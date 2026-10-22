@@ -6,7 +6,7 @@
   import { visibleText } from "../domain/hiddenMessages";
   import { parsePoll } from "../domain/extraEvents";
   import { compact } from "../domain/interactions";
-  import { emojisOf, mediaOf, quoteCardId, quoteSource, withoutMedia, withoutQuoteLink } from "../domain/content";
+  import { emojisOf, mediaOf, quoteCards, withoutMedia, withoutQuoteLink } from "../domain/content";
   import { address, parent } from "../domain/threads";
   import { isHex64, tagValue, type Event } from "../nostr/events";
   import { profileHref, threadHref, writeHref } from "../router.svelte";
@@ -24,6 +24,7 @@
   import Content from "./Content.svelte";
   import EmbedView from "./EmbedView.svelte";
   import EmojiPicker from "./EmojiPicker.svelte";
+  import HiddenMessage from "./HiddenMessage.svelte";
   import Icon from "./Icon.svelte";
   import MediaGrid from "./MediaGrid.svelte";
   import PollView from "./PollView.svelte";
@@ -52,9 +53,9 @@
     navigate(href);
   }
   const media = $derived(mediaOf(note));
-  const quote = $derived(nested ? null : quoteCardId(note));
-  const quoteFrom = $derived(quote ? quoteSource(note, quote) : null);
-  const body = $derived(withoutQuoteLink(withoutMedia(note.content, media), quote));
+  // 引用カードは q タグと本文の note・nevent を 3 件まで（Android 版の Quotes.cards）。引用カードの中では出さない
+  const quotes = $derived(nested ? [] : quoteCards(note));
+  const body = $derived(withoutQuoteLink(withoutMedia(note.content, media), quotes.map((q) => q.id)));
   const emojis = $derived(emojisOf(note));
   const profile = $derived(profiles.get(note.pubkey)?.profile);
   /** 名前の横の @ユーザー名（表示名と別の name があるとき）。 */
@@ -258,7 +259,7 @@
           <Icon name="insertEmoticon" size={18} />
         </button>
         {#if pickerOpen}
-          <EmojiPicker close={() => (pickerOpen = false)} pick={(content, emoji) => { pickerOpen = false; void actions.react(note, content, emoji); }} />
+          <EmojiPicker hiddenInput close={() => (pickerOpen = false)} pick={(content, emoji) => { pickerOpen = false; void actions.react(note, content, emoji); }} />
         {/if}
       </span>
       {@render moreMenu()}
@@ -289,7 +290,7 @@
       {#if long}<button type="button" class="expand" onclick={() => (expanded = !expanded)}>{expanded ? "折りたたむ" : "続きを読む"}</button>{/if}
     {/if}
     {#if poll}<PollView {poll} />{/if}
-    {#if quote && quoteFrom}<QuoteCard id={quote} relays={quoteFrom.relays} author={quoteFrom.author} />{/if}
+    {#each quotes as q (q.id)}<QuoteCard id={q.id} relays={q.relays} author={q.author} />{/each}
     {#if shownMedia.length > 0}<MediaGrid media={shownMedia} author={note.pubkey} />{/if}
     {#each embeds as embed (embed.src)}<EmbedView {embed} />{/each}
     {#if hiddenMedia > 0}<button type="button" class="expand" onclick={() => (mediaRevealed = true)}><Icon name="image" size={16} />画像・動画を表示（{hiddenMedia}）</button>{/if}
@@ -310,7 +311,11 @@
   {#if reaction}
     {@const reacted = reactionDisplay(reaction)}
     <a class="repost" href={profileHref(reaction.pubkey)}>
-      {#if reacted.type === "image"}<img class="reaction" src={reacted.url} alt=":{reacted.shortcode}:" referrerpolicy="no-referrer" />
+      {#if reacted.hidden}
+        <HiddenMessage visible={reacted.type === "text" ? reacted.text : reacted.type === "image" ? `:${reacted.shortcode}:` : "❤️"} message={reacted.hidden} dialog>
+          {#if reacted.type === "image"}<img class="reaction" src={reacted.url} alt=":{reacted.shortcode}:" referrerpolicy="no-referrer" />{:else if reacted.type === "text"}<span class="reaction">{reacted.text}</span>{:else}<Icon name="favorite" size={16} />{/if}
+        </HiddenMessage>
+      {:else if reacted.type === "image"}<img class="reaction" src={reacted.url} alt=":{reacted.shortcode}:" referrerpolicy="no-referrer" />
       {:else if reacted.type === "text"}<span class="reaction">{reacted.text}</span>
       {:else}<Icon name="favorite" size={16} />{/if}{displayName(reaction.pubkey)} がリアクション
     </a>

@@ -1,6 +1,6 @@
 import { emojis } from "./emojis.svelte";
 import type { EventTemplate } from "nostr-tools";
-import { confirmReason, diffTags, nextList, restoreList, suspiciousDrop, tagKey, withoutTag, withTag, type ConfirmReason, type ListDiff, type RestoreMode } from "../domain/lists";
+import { confirmReason, diffTags, nextList, restoreList, suspiciousDrop, tagKey, withoutTag, withTag, type ConfirmReason, type ListDiff, type RestoreMode, withPetname } from "../domain/lists";
 import { latest, newer, type Event } from "../nostr/events";
 import { delay, eventsOf, pool, publish, type PublishResult } from "../nostr/pool";
 import { relaySet } from "../nostr/relayUrl";
@@ -84,6 +84,11 @@ class Lists {
 
   unfollow(pubkey: string) {
     return this.change(3, (tags) => withoutTag(tags, "p", pubkey), true);
+  }
+
+  /** ペットネームを書き換える（空にすると消す）。 */
+  renamePetname(pubkey: string, petname: string) {
+    return this.change(3, (tags) => withPetname(tags, pubkey, petname), true);
   }
 
   muteUser(pubkey: string) {

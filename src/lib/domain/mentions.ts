@@ -9,7 +9,7 @@ export const MAX_QUERY = 30;
 export const LIMIT = 8;
 
 export interface MentionQuery { start: number; end: number; text: string }
-export interface MentionPerson { pubkey: string; name?: string; displayName?: string; nip05?: string }
+export interface MentionPerson { pubkey: string; name?: string; displayName?: string; nip05?: string; petname?: string }
 
 /** メールアドレスの文字（この直後の @ は補完しない）。 */
 const mailLike = (char: string) => /[A-Za-z0-9._\-+%]/.test(char);
@@ -36,7 +36,7 @@ export function normalize(value: string): string {
     .join("");
 }
 
-const labelOf = (p: MentionPerson) => p.displayName || p.name || "";
+const labelOf = (p: MentionPerson) => p.petname || p.displayName || p.name || "";
 
 /**
  * 候補を良い順に。名前の先頭 → 単語の先頭 → 途中 → 公開鍵・npub の先頭（4 文字以上）。同じ順位ならフォロー中を先に。
@@ -52,7 +52,7 @@ export function mentionCandidates(query: string, people: Iterable<MentionPerson>
   if (!wanted) return all.filter((p) => follows.has(p.pubkey)).sort(byName).slice(0, limit);
   const ranked: { person: MentionPerson; rank: number }[] = [];
   for (const person of all) {
-    const names = [person.displayName ?? "", person.name ?? "", (person.nip05 ?? "").split("@")[0]].map(normalize).filter(Boolean);
+    const names = [person.petname ?? "", person.displayName ?? "", person.name ?? "", (person.nip05 ?? "").split("@")[0]].map(normalize).filter(Boolean);
     let rank: number;
     if (names.some((n) => n.startsWith(wanted))) rank = 0;
     else if (names.some((n) => n.split(/[ _\-.]/).some((w) => w.startsWith(wanted)))) rank = 1;

@@ -1,6 +1,8 @@
 <script lang="ts">
   import { untrack } from "svelte";
-  import { withoutMedia, mediaOf, withoutQuoteLink, quoteCardId } from "../domain/content";
+  import { withoutMedia, mediaOf, withoutQuoteLink, quoteCards } from "../domain/content";
+  import { reactionHidden } from "../domain/hiddenMessages";
+  import HiddenMessage from "./HiddenMessage.svelte";
   import { actionLines, formatSats, reactedTo, sats, type ActionLine, type NotificationGroup } from "../domain/notifications";
   import type { Event } from "../nostr/events";
   import { profileHref, threadHref } from "../router.svelte";
@@ -55,7 +57,7 @@
 
   /** 投稿の 2 行の要約。 */
   function summary(note: Event) {
-    const body = withoutQuoteLink(withoutMedia(note.content, mediaOf(note)), quoteCardId(note)).replace(/\s+/g, " ").trim();
+    const body = withoutQuoteLink(withoutMedia(note.content, mediaOf(note)), quoteCards(note).map((q) => q.id)).replace(/\s+/g, " ").trim();
     return body || (mediaOf(note).length > 0 ? "（画像）" : "（本文なし）");
   }
 
@@ -98,6 +100,10 @@
     <span class="mark">
       {#if item.type === "zap"}<span class="zap"><Icon name="bolt" size={20} label="zap" /></span>
       {:else if item.type === "reposts"}<Icon name="repeat" size={20} label="リポスト" />
+      {:else if item.hidden.length > 0}
+        <HiddenMessage visible={item.content} message={item.hidden.map((h) => `${displayName(h.actor)}: ${h.message}`).join("\n")} dialog>
+          {#if item.emoji}<img class="emoji" src={item.emoji} alt={item.content} referrerpolicy="no-referrer" />{:else}<span class="reaction">{item.content}</span>{/if}
+        </HiddenMessage>
       {:else if item.emoji}<img class="emoji" src={item.emoji} alt={item.content} title={item.content} referrerpolicy="no-referrer" />
       {:else if item.content === "+"}<Icon name="favoriteBorder" size={20} label="いいね" />
       {:else}<span class="reaction">{item.content}</span>{/if}
@@ -134,7 +140,7 @@
     {/if}
     {#if target?.kind === 7}
       <button type="button" class="summary" onclick={openTarget}>
-        <span class="chip">{#if target.content.trim() === "+" || !target.content.trim()}<Icon name="favoriteBorder" size={14} />{:else}{target.content}{/if}</span>
+        <span class="chip">{#if target.content.trim() === "+" || !target.content.trim()}<Icon name="favoriteBorder" size={14} />{:else if reactionHidden(target.content.trim())}{@const mine = reactionHidden(target.content.trim())!}<HiddenMessage visible={mine.visible} message={mine.message} dialog />{:else}{target.content}{/if}</span>
         <span class="body">{reactedPost ? summary(reactedPost) : "リアクションした投稿は未取得です"}</span>
       </button>
     {:else if target && group.kind === "action"}

@@ -85,3 +85,24 @@ export function restoreList(current: Event | undefined, old: Event, mode: Restor
   for (const tag of items(old.tags)) if (!keys.has(tagKey(tag))) tags.push([...tag]);
   return nextList(old.kind, current, tags, now, current?.content ?? "");
 }
+
+/** フォロー一覧のペットネーム（`p` タグの 4 つ目。160 文字まで、制御文字なし。Android 版の FollowList.petnames）。 */
+export function petnames(event: Event | undefined): Map<string, string> {
+  const result = new Map<string, string>();
+  for (const tag of event?.tags ?? []) {
+    if (tag[0] !== "p" || !/^[0-9a-f]{64}$/.test(tag[1] ?? "")) continue;
+    const name = tag[3]?.trim();
+    // eslint-disable-next-line no-control-regex
+    if (name && name.length <= 160 && !/[\u0000-\u001f\u007f-\u009f]/.test(name)) result.set(tag[1], name);
+  }
+  return result;
+}
+
+/** ペットネームを書き換える（空にすると消す）。フォロー中の人だけ。リレーのヒントは残す（Android 版の FollowList.rename）。 */
+export function withPetname(tags: string[][], target: string, petname: string): string[][] {
+  const value = petname.trim();
+  // eslint-disable-next-line no-control-regex
+  if (value.length > 160 || /[\u0000-\u001f\u007f-\u009f]/.test(value)) throw new Error("ペットネームは160文字以内で入力してください");
+  if (!tags.some((tag) => tag[0] === "p" && tag[1] === target)) throw new Error("フォロー中のユーザーに設定できます");
+  return tags.map((tag) => (tag[0] === "p" && tag[1] === target ? ["p", target, tag[2] ?? "", value] : tag));
+}

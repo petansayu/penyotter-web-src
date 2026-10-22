@@ -29,6 +29,8 @@
 {:else if route.name === "relay"}
   <!-- 開いたときだけ読み込む画面（本体を小さくするため） -->
   {#key route.url}{#await import("./RelayInfoView.svelte") then { default: RelayInfoView }}<RelayInfoView url={route.url} />{/await}{/key}
+{:else if route.name === "lists"}
+  {#key route.identifier}{#await import("./ListsPanel.svelte") then { default: ListsPanel }}<ListsPanel identifier={route.identifier} />{/await}{/key}
 {:else if route.name === "write"}
   {#key route.identifier}{#await import("./ArticleEditor.svelte") then { default: ArticleEditor }}<ArticleEditor identifier={route.identifier} />{/await}{/key}
 {:else if route.name === "chat"}

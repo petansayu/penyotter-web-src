@@ -133,6 +133,8 @@
   }
 
   const snippet = (event: Event | undefined) => (event ? visibleText(event.content).replace(/\s+/g, " ").slice(0, 60) : "（読み込めていないメッセージ）");
+  /** 通報するメッセージ。 */
+  let reporting = $state<Event | null>(null);
 </script>
 
 {#if !channel}
@@ -248,13 +250,22 @@
       {#if viewer.canSign && !mine}
         <button type="button" role="menuitem" onclick={() => act((m) => void lists.muteUser(m.pubkey))}>{displayName(target.pubkey)} をミュート</button>
         <button type="button" role="menuitem" onclick={() => act((m) => void lists.mutePost(m.id))}>このメッセージをミュート</button>
+        <button type="button" role="menuitem" class="danger" onclick={() => act((m) => (reporting = m))}>通報</button>
       {/if}
       <button type="button" class="cancel" onclick={() => (menuFor = null)}>閉じる</button>
     </div>
   </div>
 {/if}
 
+{#if reporting}
+  {@const target = reporting}
+  {#await import("./ReportDialog.svelte") then { default: ReportDialog }}<ReportDialog target={{ note: target, pubkey: target.pubkey }} close={() => (reporting = null)} />{/await}
+{/if}
+
 <style>
+  .danger {
+    color: #c33 !important;
+  }
   .list {
     padding: 8px 16px;
     display: grid;

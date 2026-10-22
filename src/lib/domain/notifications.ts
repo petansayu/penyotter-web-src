@@ -1,3 +1,4 @@
+import { reactionHidden } from "./hiddenMessages";
 import { isHex64, type Event } from "../nostr/events";
 import { emojisOf, quoteCardId } from "./content";
 import { parent } from "./threads";
@@ -172,7 +173,7 @@ export function notificationGroups(events: Iterable<Event>, me: string, options:
 
 export type ActionLine =
   | { type: "zap"; event: Event; receipt: ZapReceipt }
-  | { type: "reaction"; content: string; emoji: string | null; actors: string[] }
+  | { type: "reaction"; content: string; emoji: string | null; actors: string[]; hidden: { actor: string; message: string }[] }
   | { type: "reposts"; actors: string[] };
 
 /** まとめたカードの行: zap（新しい順に 1 件ずつ）、リポスト、絵文字ごとのリアクション。 */
@@ -182,14 +183,17 @@ export function actionLines(group: NotificationGroup): ActionLine[] {
     return receipt ? [{ type: "zap" as const, event, receipt }] : [];
   });
   const reposts = [...new Set(group.events.filter((event) => notificationType(event) === "reposts").map((event) => event.pubkey))];
-  const reactions = new Map<string, { content: string; emoji: string | null; actors: string[] }>();
+  const reactions = new Map<string, { content: string; emoji: string | null; actors: string[]; hidden: { actor: string; message: string }[] }>();
   for (const event of group.events.filter((e) => notificationType(e) === "reactions")) {
-    const content = event.content.trim() || "+";
+    // 隠しメッセージ（セクシー餃子）付きは、見える絵文字でまとめる（Android 版と同じ）
+    const secret = reactionHidden(event.content.trim());
+    const content = (secret ? secret.visible : event.content.trim()) || "+";
     const shortcode = /^:([A-Za-z0-9_-]+):$/.exec(content)?.[1];
     const emoji = shortcode ? emojisOf(event).get(shortcode) ?? null : null;
     const key = `${content}\u0000${emoji ?? ""}`;
-    const line = reactions.get(key) ?? { content, emoji, actors: [] };
+    const line = reactions.get(key) ?? { content, emoji, actors: [], hidden: [] };
     if (!line.actors.includes(event.pubkey)) line.actors.push(event.pubkey);
+    if (secret) line.hidden.push({ actor: event.pubkey, message: secret.message });
     reactions.set(key, line);
   }
   return [

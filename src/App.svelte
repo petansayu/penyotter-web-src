@@ -95,18 +95,19 @@
   let pullDistance = $state(0);
   let pullReady = $state(false);
   let refreshing = $state(false);
-  // Android 版と同じく、スワイプで回るのはホーム・通知・検索・チャットの 4 つ
-  const tabHrefs = ["#/", "#/notifications", "#/search", "#/chat"];
+  // Android 版と同じく、スワイプで回るのはホーム・通知・検索・チャットの 4 つ（設定で自分のプロフィールも）
+  const tabHrefs = $derived(["#/", "#/notifications", "#/search", "#/chat", ...(settings.profileInPager && viewer.pubkey ? [profileHref(viewer.pubkey)] : [])]);
   const tabIndex = $derived.by(() => {
     if (route.name === "home") return 0;
     if (route.name === "notifications") return 1;
     if (route.name === "search") return 2;
     if (route.name === "chat" && route.channel === null) return 3;
+    if (settings.profileInPager && route.name === "profile" && route.pubkey === viewer.pubkey) return 4;
     return -1;
   });
   /** 「その他」のメニュー（Android 版の MoreMenu: プロフィール・DM・ブックマーク・設定）。 */
   let moreOpen = $state(false);
-  const inMore = $derived(route.name === "messages" || route.name === "bookmarks" || route.name === "settings" || (route.name === "profile" && route.pubkey === viewer.pubkey));
+  const inMore = $derived(route.name === "messages" || route.name === "bookmarks" || route.name === "lists" || route.name === "settings" || (route.name === "profile" && route.pubkey === viewer.pubkey));
 
   $effect(() => {
     if (!mainElement || deck.active) return;
@@ -199,6 +200,7 @@
       <nav class="more-sheet" aria-label="その他">
         <a href={profileHref(viewer.pubkey)} onclick={() => (moreOpen = false)}><Icon name="person" />プロフィール</a>
         <a href="#/messages" onclick={() => (moreOpen = false)}><Icon name="mail" />DM{#if dms.unreadCount > 0}<span class="count">{dms.unreadCount}</span>{/if}</a>
+        <a href="#/lists" onclick={() => (moreOpen = false)}><Icon name="listAlt" />リスト</a>
         <a href="#/bookmarks" onclick={() => (moreOpen = false)}><Icon name="bookmarkBorder" />ブックマーク</a>
         <a href="#/settings" onclick={() => (moreOpen = false)}><Icon name="settings" />設定</a>
       </nav>

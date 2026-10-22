@@ -2,6 +2,8 @@
   import { untrack } from "svelte";
   import type { Event } from "../nostr/events";
   import { reactionDisplay } from "../domain/emojis";
+  import { reactionVisible } from "../domain/hiddenMessages";
+  import HiddenMessage from "./HiddenMessage.svelte";
   import { profileHref, relayHref } from "../router.svelte";
   import { displayName } from "../store/cache.svelte";
   import { Thread } from "../store/thread.svelte";
@@ -19,16 +21,18 @@
   let openNested = $state(new Set<string>());
 
   /** リアクションの見せ方（文字か画像）。 */
-  const label = (event: Event) => {
+  const label = (event: Event): { text: string; url?: string; hidden?: string } => {
     const shown = reactionDisplay(event);
-    return shown.type === "like" ? { text: "+" } : shown.type === "image" ? { url: shown.url, text: `:${shown.shortcode}:` } : { text: shown.text };
+    const base = shown.type === "like" ? { text: "+" } : shown.type === "image" ? { url: shown.url, text: `:${shown.shortcode}:` } : { text: shown.text };
+    return { ...base, hidden: shown.hidden };
   };
 
   /** リアクションへのリアクションを、絵文字ごとの数に（多い順）。 */
   function countsOf(events: Event[]) {
     const groups = new Map<string, { event: Event; count: number }>();
     for (const event of events) {
-      const key = event.content.trim() || "+";
+      // 隠しメッセージ付きも、見える絵文字でまとめる
+      const key = reactionVisible(event.content.trim()) || "+";
       const group = groups.get(key);
       if (group) group.count++;
       else groups.set(key, { event, count: 1 });
@@ -57,6 +61,12 @@
   });
 </script>
 
+{#snippet emoji(shown: { text: string; url?: string; hidden?: string })}
+  {#if shown.hidden}
+    <HiddenMessage visible={shown.text} message={shown.hidden} dialog>{#if shown.url}<img src={shown.url} alt={shown.text} referrerpolicy="no-referrer" />{:else}{shown.text}{/if}</HiddenMessage>
+  {:else if shown.url}<img src={shown.url} alt={shown.text} referrerpolicy="no-referrer" />{:else}{shown.text}{/if}
+{/snippet}
+
 {#if thread}
   {#if thread.ancestors?.truncated}<p class="note">返信元をすべては表示していません</p>{/if}
   {#each thread.ancestors?.ancestors ?? [] as note (note.id)}
@@ -83,7 +93,7 @@
           {@const nested = thread.reactionReactions.get(reaction.id) ?? []}
           <li>
             <a href={profileHref(reaction.pubkey)}><Avatar pubkey={reaction.pubkey} size={28} /><strong>{displayName(reaction.pubkey)}</strong></a>
-            <span class="emoji">{#if shown.url}<img src={shown.url} alt={shown.text} referrerpolicy="no-referrer" />{:else}{shown.text}{/if}</span>
+            <span class="emoji">{@render emoji(shown)}</span>
             {#if nested.length > 0}
               <button type="button" class="chips" class:open={openNested.has(reaction.id)} onclick={() => toggleNested(reaction.id)} aria-label={openNested.has(reaction.id) ? "このリアクションへの反応をたたむ" : "このリアクションへの反応を見る"}>
                 {#each countsOf(nested).slice(0, 3) as group (group.event.id)}
@@ -99,7 +109,7 @@
               {@const g = label(inner)}
               <li class="inner">
                 <a href={profileHref(inner.pubkey)}><Avatar pubkey={inner.pubkey} size={22} /><strong>{displayName(inner.pubkey)}</strong></a>
-                <span class="emoji">{#if g.url}<img src={g.url} alt={g.text} referrerpolicy="no-referrer" />{:else}{g.text}{/if}</span>
+                <span class="emoji">{@render emoji(g)}</span>
               </li>
             {/each}
           {/if}

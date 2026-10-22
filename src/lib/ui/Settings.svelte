@@ -498,6 +498,7 @@
       {@render switchRow("アイコン画像を読み込む", settings.avatarPictures, (value) => (settings.avatarPictures = value))}
       {@render switchRow("投稿画像を自動表示", settings.showImages, (value) => (settings.showImages = value))}
       {@render switchRow("動画プレーヤーを表示", settings.showVideos, (value) => (settings.showVideos = value))}
+      {@render switchRow("自分のプロフィールを左右のスワイプに入れる", settings.profileInPager, (value) => (settings.profileInPager = value), "ホーム・通知・検索・チャットの次に、自分のプロフィールへ移れるようにします。")}
       {@render switchRow("埋め込み（YouTube・X など）を自動で読み込む", settings.autoEmbeds, (value) => (settings.autoEmbeds = value), "オフのときは、押したときだけ読み込みます。読み込むと、そのサービスにこのブラウザの IP アドレスなどが伝わります（Web 版だけ）。")}
       <p class="muted">画像の自動表示をオフにすると、本文と操作だけを先に表示して通信量を抑えます。アイコン画像の読み込みをオフにすると、ほかの人のプロフィール画面を除いて、ぺにょったーのオリジナルアバターで表示します。リンクプレビューは、Web 版ではまだありません。</p>
       <h3>センシティブ</h3>

@@ -12,6 +12,7 @@ export type Route =
   | { name: "mutes" }
   | { name: "history" }
   | { name: "bookmarks" }
+  | { name: "lists"; identifier: string | null }
   | { name: "write"; identifier: string | null }
   | { name: "relay"; url: string }
   | { name: "secretLink" }
@@ -49,6 +50,9 @@ export function parseRoute(hash: string): Route {
   if (path === "/mutes") return { name: "mutes" };
   if (path === "/history") return { name: "history" };
   if (path === "/bookmarks") return { name: "bookmarks" };
+  if (path === "/lists") return { name: "lists", identifier: null };
+  const listId = path.match(/^\/lists\/(.+)$/)?.[1];
+  if (listId) return { name: "lists", identifier: listId };
   // nostr: のリンク（NIP-21）。ブラウザの決まりで web+nostr: として受け取る（registerProtocolHandler・manifest の
   // protocol_handlers）。Web 版だけ: Android 版の nostr: の受け口にあたる。秘密鍵（nsec・ncryptsec）は開かない
   if (path === "/open") {
