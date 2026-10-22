@@ -1,0 +1,37 @@
+{
+  "name": "penyotter-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "check": "svelte-check --tsconfig ./tsconfig.app.json && tsc -p tsconfig.node.json",
+    "test": "vitest run",
+    "dev:test": "vite --mode testrelay --port 5174 --strictPort",
+    "test-relay": "node scripts/test-relay.mjs",
+    "test-bunker": "node scripts/test-bunker.mjs",
+    "test-blossom": "node scripts/test-blossom.mjs"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^7.3.1",
+    "@tsconfig/svelte": "^5.0.8",
+    "@types/node": "^24.19.2",
+    "fake-indexeddb": "^6.2.6",
+    "sharp": "^0.35.5",
+    "svelte": "^5.57.2",
+    "svelte-check": "^4.7.7",
+    "typescript": "~6.0.3",
+    "vite": "^8.3.4",
+    "vitest": "^5.0.5",
+    "ws": "^8.22.0"
+  },
+  "dependencies": {
+    "@noble/hashes": "^2.4.0",
+    "emojibase-data": "17.0.0",
+    "markdown-it": "^15.0.3",
+    "nostr-tools": "^2.25.2",
+    "uqr": "^0.1.3"
+  }
+}

@@ -1,0 +1,21 @@
+# Cloudflare Pages の応答ヘッダー（ビルドで dist/_headers になる）。書き方は https://developers.cloudflare.com/pages/configuration/headers/
+
+/*
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; media-src 'self' https: blob:; connect-src 'self' https: wss:; font-src 'self'; manifest-src 'self'; worker-src 'self'; frame-src https://www.youtube-nocookie.com https://platform.twitter.com https://open.spotify.com https://w.soundcloud.com https://embed.nicovideo.jp https://player.vimeo.com https://www.tiktok.com https://www.instagram.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=()
+
+# 画面の入口と Service Worker は毎回確かめる（新しい版にすぐ気づけるように）
+/
+  Cache-Control: no-cache
+/index.html
+  Cache-Control: no-cache
+/sw.js
+  Cache-Control: no-cache
+/manifest.webmanifest
+  Cache-Control: no-cache
+
+# ファイル名に中身のハッシュが入っているので、ずっと使ってよい
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable

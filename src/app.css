@@ -1,0 +1,112 @@
+/* 色は src/lib/ui/themes.ts が :root に置く。ここは読み込み前の仮の色（そらのライト） */
+:root {
+  --column: 640px;
+  --background: #f8f9fb;
+  --text: #20252b;
+  --muted: #747d87;
+  --primary: #568daa;
+  --on-primary: #ffffff;
+  --secondary: #6a8fa3;
+  --tertiary: #568daa;
+  --surface: #eaf0f5;
+  --surface-low: #f1f4f8;
+  --container: #eef2f6;
+  --primary-container: #d8e5ed;
+  --secondary-container: #e2ebf1;
+  --outline: #b9bdc1;
+  --outline-variant: #e1e3e6;
+  font-family: system-ui, -apple-system, "Segoe UI", "Hiragino Sans", "Noto Sans JP", "Yu Gothic UI", Meiryo, sans-serif;
+  font-size: 15px;
+  -webkit-text-size-adjust: 100%;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--background);
+  /* 左右のスワイプはアプリのタブの切り替えに使うので、ブラウザの「横に引いて戻る」と、
+     上で引っぱって再読み込み（アプリの引っぱって読み直すにする）を止める */
+  overscroll-behavior-x: none;
+  overscroll-behavior-y: contain;
+}
+
+body {
+  overscroll-behavior-x: none;
+  overscroll-behavior-y: contain;
+  margin: 0;
+  background: var(--background);
+  color: var(--text);
+  overflow-x: hidden;
+}
+
+#app {
+  max-width: var(--column);
+  margin: 0 auto;
+  min-height: 100dvh;
+  border-left: 1px solid var(--outline-variant);
+  border-right: 1px solid var(--outline-variant);
+}
+
+/* カラム表示（src/lib/ui/Deck.svelte）では、画面の幅いっぱいに列を並べる */
+:root.deck #app {
+  max-width: none;
+  border: none;
+}
+
+:root.deck body {
+  overflow: hidden;
+}
+
+@media (max-width: 640px) {
+  #app {
+    border: none;
+  }
+}
+
+/* カラム表示で、キーボードで選んでいる投稿 */
+article.kb-selected {
+  box-shadow: inset 3px 0 0 var(--primary);
+  background: color-mix(in srgb, var(--primary-container) 35%, transparent);
+}
+
+/* オン・オフの切り替え（Android 版の Switch の見た目） */
+input[type="checkbox"][role="switch"] {
+  appearance: none;
+  position: relative;
+  flex: none;
+  width: 44px;
+  height: 24px;
+  margin: 0;
+  border-radius: 999px;
+  background: var(--outline);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+input[type="checkbox"][role="switch"]::before {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--background);
+  transition: transform 0.15s;
+}
+input[type="checkbox"][role="switch"]:checked {
+  background: var(--primary);
+}
+input[type="checkbox"][role="switch"]:checked::before {
+  transform: translateX(20px);
+}
+
+[hidden] {
+  display: none !important;
+}
+
+:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
