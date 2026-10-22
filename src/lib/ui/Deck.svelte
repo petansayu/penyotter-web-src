@@ -32,6 +32,7 @@
       case "history": return "一覧の履歴";
       case "bookmarks": return "ブックマーク";
       case "write": return "記事を書く";
+      case "lists": return "リスト";
       case "relay": return "リレーの情報";
       case "chat": return "チャット";
       case "messages": return "DM";

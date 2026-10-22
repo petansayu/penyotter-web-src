@@ -2,7 +2,8 @@
   import { segments } from "../domain/content";
   import { mightHide, splitHidden } from "../domain/hiddenMessages";
   import HiddenMessage from "./HiddenMessage.svelte";
-  import { displayName, requestProfiles } from "../store/cache.svelte";
+  import { nip19 } from "nostr-tools";
+  import { profiles, requestProfiles } from "../store/cache.svelte";
   import { profileHref, searchHref, threadHref } from "../router.svelte";
 
   /**
@@ -22,6 +23,11 @@
     const bech = raw.replace(/^nostr:/i, "");
     return `${bech.slice(0, 12)}…${bech.slice(-4)}`;
   };
+  /** 名前がわかるまでは「npub1…」と短く出す（Android 版と同じ）。 */
+  const mentionName = (pubkey: string) => {
+    const profile = profiles.get(pubkey)?.profile;
+    return profile?.displayName || profile?.name || `${nip19.npubEncode(pubkey).slice(0, 12)}…`;
+  };
 </script>
 
 <div class="content">{#each parts as part, i (i)}{#if part.type === "text"}{#if hidden && mightHide(part.text)}{#each splitHidden(part.text) as piece, j (j)}{#if piece.type === "text"}{piece.text}{:else}<HiddenMessage visible={piece.visible} message={piece.message} />{/if}{/each}{:else}{part.text}{/if}{:else if part.type === "link"}<a
@@ -37,7 +43,7 @@
         referrerpolicy="no-referrer"
       />{:else if part.type === "hashtag"}<a class="hashtag" href={searchHref(`#${part.tag}`)}>#{part.tag}</a>{:else if part.type === "profile"}<a
         class="mention"
-        href={profileHref(part.pubkey, part.relays)}>@{displayName(part.pubkey)}</a
+        href={profileHref(part.pubkey, part.relays)}>@{mentionName(part.pubkey)}</a
       >{:else if part.type === "event"}<a class="ref" href={threadHref(part.id, part.author, part.relays)}>{shortId(part.raw)}</a
       >{:else}<span class="ref">{shortId(part.raw)}</span>{/if}{/each}</div>
 

@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { CustomEmoji } from "../domain/emojis";
+  import { MAX_HIDDEN_BYTES, withHiddenReaction } from "../domain/hiddenMessages";
   import { emojis } from "../store/emojis.svelte";
   import UnicodeEmojiPicker from "./UnicodeEmojiPicker.svelte";
   import { viewer } from "../store/viewer.svelte";
@@ -9,12 +10,21 @@
    * 絵文字のパレット（Android 版の ReactionDialog と投稿欄の絵文字）。「標準」はすべての Unicode 絵文字、「カスタム」は
    * 自分のカスタム絵文字（NIP-30）。選んだら pick を呼ぶ。placement は開く向き（投稿欄では上に開く）。
    */
-  let { pick, close, placement = "below", title = "リアクション" }: {
+  let { pick: chosen, close, placement = "below", title = "リアクション", hiddenInput = false }: {
     pick: (content: string, emoji?: CustomEmoji) => void;
     close: () => void;
     placement?: "below" | "above";
     title?: string;
+    /** リアクションのとき、押した絵文字の後ろに隠しメッセージ（セクシー餃子）を付ける入力欄を出す（Android 版の ReactionDialog）。 */
+    hiddenInput?: boolean;
   } = $props();
+
+  let secret = $state("");
+  const secretBytes = $derived(new TextEncoder().encode(secret).length);
+  function pick(content: string, emoji?: CustomEmoji) {
+    if (secret && secretBytes > MAX_HIDDEN_BYTES) return;
+    chosen(secret ? withHiddenReaction(content, secret) : content, emoji);
+  }
 
   let tab = $state<"standard" | "custom">("standard");
   let query = $state("");
@@ -34,6 +44,13 @@
     <button type="button" role="tab" aria-selected={tab === "standard"} class:active={tab === "standard"} onclick={() => (tab = "standard")}>標準</button>
     <button type="button" role="tab" aria-selected={tab === "custom"} class:active={tab === "custom"} onclick={() => (tab = "custom")}>カスタム</button>
   </div>
+  {#if hiddenInput}
+    <label class="secret">
+      <span>🥟</span>
+      <input type="text" bind:value={secret} placeholder="隠しメッセージ（任意）" aria-label="リアクションに付ける隠しメッセージ" />
+      {#if secret}<small class:over={secretBytes > MAX_HIDDEN_BYTES}>{secretBytes}/{MAX_HIDDEN_BYTES}</small>{/if}
+    </label>
+  {/if}
   {#if tab === "standard"}
     <UnicodeEmojiPicker pick={(emoji) => pick(emoji)} />
   {:else}
@@ -59,6 +76,29 @@
 {#if editing}{#await import("./EmojiListEditor.svelte") then { default: EmojiListEditor }}<EmojiListEditor close={() => (editing = false)} />{/await}{/if}
 
 <style>
+  .secret {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 6px 8px 0;
+    font-size: 0.85em;
+  }
+  .secret input {
+    flex: 1;
+    min-width: 0;
+    font: inherit;
+    padding: 4px 8px;
+    color: var(--text);
+    background: var(--background);
+    border: 1px solid var(--outline);
+    border-radius: 8px;
+  }
+  .secret small {
+    color: var(--muted);
+  }
+  .secret small.over {
+    color: #c33;
+  }
   .edit {
     display: block;
     margin: 4px 8px 6px auto;

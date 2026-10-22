@@ -11,6 +11,9 @@
   import { countFollowers, loadBadges, loadFollowers, loadFollowing, loadPinned, loadReactions, loadRelays } from "../store/profileExtras";
   import { requestStatuses, statuses } from "../store/statuses.svelte";
   import NoteCard from "./NoteCard.svelte";
+  import { quoteCardId } from "../domain/content";
+  import { parent } from "../domain/threads";
+  import type { Card } from "../store/feed.svelte";
   import ReportDialog from "./ReportDialog.svelte";
   import StatusEditor from "./StatusEditor.svelte";
   import { Feed, PROFILE_KINDS } from "../store/feed.svelte";
@@ -27,13 +30,25 @@
   let { pubkey, relays = [] }: { pubkey: string; relays?: string[] } = $props();
 
   const profile = $derived(profiles.get(pubkey)?.profile);
-  const name = $derived(profile?.displayName || profile?.name || `${nip19.npubEncode(pubkey).slice(0, 16)}…`);
+  const petname = $derived(viewer.petnames.get(pubkey));
+  const name = $derived(petname ? `📛${petname}` : profile?.displayName || profile?.name || `${nip19.npubEncode(pubkey).slice(0, 16)}…`);
+  let editingPetname = $state<string | null>(null);
   const npub = $derived(nip19.npubEncode(pubkey));
   let copied = $state(false);
   const self = $derived(pubkey === viewer.pubkey);
   const following = $derived(viewer.follows.includes(pubkey));
   const muted = $derived(viewer.mutedPubkeys.has(pubkey));
   let editing = $state(false);
+
+  /** 投稿タブの印: 引用・返信（kind 1111 はコメント）・メンション。リポストには付けない（Android 版の ProfileActivityLabel）。 */
+  function activityLabel(card: Card): string | null {
+    if (card.repost || card.reaction) return null;
+    const note = card.note;
+    if (quoteCardId(note) !== null) return "引用";
+    if (parent(note) !== null) return note.kind === 1111 ? "コメント" : "返信";
+    if (note.tags.some((tag) => tag[0] === "p" && tag[1])) return "メンション";
+    return null;
+  }
   let editingStatus = $state(false);
   let reporting = $state(false);
   const TABS: [Tab, string][] = [["posts", "投稿"], ["articles", "記事"], ["reactions", "リアクション"], ["relays", "リレー"]];
@@ -160,6 +175,18 @@
     {/if}
     <h1>{name}{#if profile?.bot}<span class="bot">BOT</span>{/if}</h1>
     {#if !self && viewer.ready && following}<div class="badge">フォロー中</div>{/if}
+    {#if petname}<div class="petname">設定中 · 📛{petname}{#if profile?.displayName || profile?.name}（{profile?.displayName || profile?.name}）{/if}</div>{/if}
+    {#if viewer.canSign && following && !self}
+      {#if editingPetname === null}
+        <button type="button" class="link" onclick={() => (editingPetname = petname ?? "")}>📛 ペットネームを編集</button>
+      {:else}
+        <div class="petname-edit">
+          <input type="text" maxlength="160" bind:value={editingPetname} placeholder="空にすると消します" aria-label="ペットネーム" />
+          <button type="button" class="link" disabled={lists.busy.has(3)} onclick={async () => { if (await lists.renamePetname(pubkey, editingPetname ?? "")) editingPetname = null; }}>保存</button>
+          <button type="button" class="link" onclick={() => (editingPetname = null)}>やめる</button>
+        </div>
+      {/if}
+    {/if}
     {#if profile?.name && profile.displayName && profile.name !== profile.displayName}<div class="muted">@{profile.name}</div>{/if}
     {#if profile?.nip05}
       <div class="nip05">
@@ -226,7 +253,7 @@
     <div class="pinned-label"><Icon name="pushPin" size={12} />ピン留め</div>
     <NoteCard {note} />
   {/each}
-  {#if feed}<Timeline {feed} />{/if}
+  {#if feed}<Timeline {feed} label={activityLabel} />{/if}
 {/if}
 {#if tab === "articles" && self && viewer.canSign}<a class="write" href={writeHref()}>＋ 記事を書く</a>{/if}
 {#if tab === "articles" && articles}<Timeline feed={articles} empty="記事はありません" />{/if}
@@ -343,6 +370,26 @@
     color: var(--muted);
     border: 1px solid var(--outline);
     border-radius: 6px;
+  }
+  .petname {
+    font-size: 0.85em;
+    color: var(--primary);
+  }
+  .petname-edit {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin: 4px 0;
+  }
+  .petname-edit input {
+    flex: 1;
+    min-width: 0;
+    font: inherit;
+    padding: 4px 8px;
+    color: var(--text);
+    background: var(--background);
+    border: 1px solid var(--outline);
+    border-radius: 8px;
   }
   .nip05 {
     display: flex;

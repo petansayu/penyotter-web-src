@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Event } from "../nostr/events";
 import { clientName, contentWarning, isLongBody, latestStatuses, proxyOrigin, subjectToShow } from "./cardInfo";
-import { encodeHidden, splitHidden, visibleText } from "./hiddenMessages";
+import { encodeHidden, reactionHidden, reactionVisible, splitHidden, visibleText, withHiddenReaction } from "./hiddenMessages";
 
 const A = "a".repeat(64);
 const ev = (fields: Partial<Event>): Event => ({ id: "1".repeat(64), pubkey: A, created_at: 10, kind: 1, tags: [], content: "", sig: "", ...fields });
@@ -66,5 +66,18 @@ describe("隠しメッセージ", () => {
     // 0〜15 を U+E00F0 からに置く書き方
     const shifted = "🥟" + [...new TextEncoder().encode("A\n")].map((b) => String.fromCodePoint(b < 16 ? 0xe00f0 + b : 0xe0100 + b - 16)).join("");
     expect(splitHidden(shifted)).toEqual([{ type: "hidden", visible: "🥟", message: "A\n" }]);
+  });
+});
+
+describe("リアクションの隠しメッセージ", () => {
+  it("❤️ の見た目の選択（U+FE0F）は絵文字の側に含める", () => {
+    expect(splitHidden(encodeHidden("❤️", "やあ"))).toEqual([{ type: "hidden", visible: "❤️", message: "やあ" }]);
+  });
+  it("content 全体が「絵文字＋セレクタ」のときだけ。「+」は ❤️ にする", () => {
+    expect(reactionHidden(withHiddenReaction("+", "ひみつ"))).toEqual({ visible: "❤️", message: "ひみつ" });
+    expect(reactionHidden(withHiddenReaction(":pe:", "a"))).toEqual({ visible: ":pe:", message: "a" });
+    expect(reactionHidden("❤️")).toBeNull();
+    expect(reactionHidden(`あ ${encodeHidden("❤️", "x")}`)).toBeNull();
+    expect(reactionVisible(withHiddenReaction("🎉", "おめでとう"))).toBe("🎉");
   });
 });

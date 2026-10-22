@@ -114,14 +114,32 @@ export function quoteSource(event: Event, id: string): { relays: string[]; autho
   return { relays, author };
 }
 
+/** 1 つの投稿に並べる引用カードの数（Android 版の Quotes.MAX_CARDS）。 */
+export const MAX_QUOTE_CARDS = 3;
+
+/**
+ * 引用カードに出す投稿（Android 版の Quotes.cards）。`q` タグを先に、次に本文のどこかにある nostr:note・nevent を、
+ * 重ねずに 3 件まで。リレーのヒントと作者も添える（そのありかから読むため）。4 件目からはリンクのまま。
+ */
+export function quoteCards(event: Event): { id: string; relays: string[]; author?: string }[] {
+  const ids: string[] = [];
+  for (const tag of event.tags) if (tag[0] === "q" && /^[0-9a-fA-F]{64}$/.test(tag[1] ?? "")) ids.push(tag[1].toLowerCase());
+  for (const match of event.content.matchAll(REFERENCE)) {
+    const id = eventIdOf(match[1]);
+    if (id) ids.push(id);
+  }
+  return [...new Set(ids)].slice(0, MAX_QUOTE_CARDS).map((id) => ({ id, ...quoteSource(event, id) }));
+}
+
 /** 引用カードの上に出す本文。引用した投稿へのリンクはどこにあっても取り除き、リンクだけの行は行ごと消す（Quotes.body）。 */
-export function withoutQuoteLink(text: string, card: string | null): string {
-  if (!card) return text;
-  const links = [...new Set([...text.matchAll(REFERENCE)].filter((match) => eventIdOf(match[1]) === card).map((match) => match[0]))];
+export function withoutQuoteLink(text: string, card: string | string[] | null): string {
+  const cards = new Set(Array.isArray(card) ? card : card ? [card] : []);
+  if (cards.size === 0) return text;
+  const links = [...new Set([...text.matchAll(REFERENCE)].filter((match) => cards.has(eventIdOf(match[1]) ?? "")).map((match) => match[0]))];
   if (links.length === 0) return text;
   let result = text;
   for (const link of links) {
-    result = result.replace(new RegExp(`^[ \\t]*${escapeRegExp(link)}[ \\t]*(?:\\r?\\n|$)`, "gm"), "").split(link).join("");
+    result = result.replace(new RegExp(`^[ \\t]*${escapeRegExp(link)}[ \\t]*(?:\\r?\\n|$)`, "gm"), "").replace(new RegExp(`[ \t]?${escapeRegExp(link)}`, "g"), "");
   }
   return result.replace(/[ \t]+(?=\r?\n|$)/g, "").replace(/(?:\r?\n){3,}/g, "\n\n").trim();
 }

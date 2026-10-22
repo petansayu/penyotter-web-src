@@ -49,7 +49,8 @@
   let searchTimer: ReturnType<typeof setTimeout> | undefined;
   const candidates = $derived.by((): MentionPerson[] => {
     if (!query) return [];
-    const people = [...profiles].slice(-2000).map(([pubkey, { profile }]) => ({ pubkey, ...profile }));
+    const people = [...profiles].slice(-2000).map(([pubkey, { profile }]) => ({ pubkey, ...profile, petname: viewer.petnames.get(pubkey) }));
+    for (const [pubkey, petname] of viewer.petnames) if (!profiles.has(pubkey)) people.push({ pubkey, petname });
     return mentionCandidates(query.text, people, new Set(viewer.follows));
   });
 

@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { finalizeEvent, generateSecretKey, getPublicKey, nip19, type Event } from "nostr-tools";
+import { withHiddenReaction } from "./hiddenMessages";
 import { addressee, buildDeletion, buildEvent, buildRepost, buildUndo, CLIENT_TAG } from "./publishing";
 import { publish } from "../nostr/pool";
 import { startTestRelay } from "../../../scripts/test-relay.mjs";
@@ -66,6 +67,17 @@ describe("注意書きと消える投稿", () => {
     expect(post.tags).toContainEqual(["expiration", "4600"]);
     const plain = buildEvent(ME, { mode: "post", body: "a" }, 1000, { clientTag: false });
     expect(plain.tags.some((t) => t[0] === "content-warning" || t[0] === "expiration")).toBe(false);
+  });
+});
+
+describe("隠しメッセージ付きのリアクション", () => {
+  const target = { id: "1".repeat(64), pubkey: "b".repeat(64), kind: 1, tags: [], content: "", created_at: 1, sig: "" };
+  it("見える絵文字で確かめて送る。2,000 バイトを超えるものは送らない", () => {
+    const body = withHiddenReaction("🎉", "おめでとう");
+    expect(buildEvent(ME, { mode: "like", body, target }, 1, { clientTag: false }).content).toBe(body);
+    const custom = withHiddenReaction(":pe:", "x");
+    expect(buildEvent(ME, { mode: "like", body: custom, target, emoji: { shortcode: "pe", url: "https://x.test/p.png" } }, 1, { clientTag: false }).tags).toContainEqual(["emoji", "pe", "https://x.test/p.png"]);
+    expect(() => buildEvent(ME, { mode: "like", body: withHiddenReaction("🎉", "あ".repeat(700)), target }, 1)).toThrow();
   });
 });
 

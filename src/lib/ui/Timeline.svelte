@@ -7,7 +7,7 @@
    * 読んだ投稿を全部並べると（ホームでは 900 件ほどになる）スクロールが重くなるので、上から STEP 件ずつ出す。
    * 出した分も、画面の外にあるものは描かない（CSS の content-visibility）。
    */
-  let { feed, empty = "投稿がありません", accept }: { feed: Feed; empty?: string; accept?: (card: Card) => boolean } = $props();
+  let { feed, empty = "投稿がありません", accept, label }: { feed: Feed; empty?: string; accept?: (card: Card) => boolean; label?: (card: Card) => string | null } = $props();
 
   const STEP = 40;
   const cards = $derived(accept ? feed.cards.filter(accept) : feed.cards);
@@ -39,7 +39,10 @@
 </script>
 
 {#each shown as card (card.key)}
-  <div class="item"><NoteCard note={card.note} repost={card.repost} reaction={card.reaction} /></div>
+  <div class="item">
+    {#if label?.(card)}<div class="activity">{label(card)}</div>{/if}
+    <NoteCard note={card.note} repost={card.repost} reaction={card.reaction} />
+  </div>
 {/each}
 
 <div class="footer" bind:this={sentinel}>
@@ -65,6 +68,11 @@
      項目の中に限るので、開いたパレットが切り取られて見えなくなっていた） */
   .item:has(:global(.picker), :global(.menu), :global(.mentions)) {
     content-visibility: visible;
+  }
+  .activity {
+    padding: 6px 16px 0 68px;
+    font-size: 0.75em;
+    color: var(--primary);
   }
   .footer {
     display: flex;

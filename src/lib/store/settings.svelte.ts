@@ -35,6 +35,7 @@ interface Saved {
   showVideos: boolean;
   revealSensitive: boolean;
   autoEmbeds: boolean;
+  profileInPager: boolean;
   oneTap: OneTap;
 }
 
@@ -55,6 +56,7 @@ const DEFAULTS: Saved = {
   showVideos: true,
   revealSensitive: false,
   autoEmbeds: false,
+  profileInPager: false,
   oneTap: { content: "+" },
 };
 
@@ -93,6 +95,7 @@ function read(): Saved {
       showVideos: flag("showVideos"),
       revealSensitive: flag("revealSensitive"),
       autoEmbeds: flag("autoEmbeds"),
+      profileInPager: flag("profileInPager"),
       oneTap: readOneTap(saved.oneTap),
     };
   } catch {
@@ -129,6 +132,8 @@ class Settings {
   revealSensitive = $state(false);
   /** 埋め込み（YouTube・X など）を押さなくても読み込む（Web 版だけ。最初はオフ）。 */
   autoEmbeds = $state(false);
+  /** 自分のプロフィールを左右のスワイプに入れる（Android 版の profileInPager、最初はオフ）。 */
+  profileInPager = $state(false);
   oneTap = $state<OneTap>(DEFAULTS.oneTap);
   /** じぶんで作ったカラーテーマ（このブラウザに保存）。 */
   savedThemes = $state<SavedTheme[]>(readSavedThemes());
@@ -178,6 +183,7 @@ class Settings {
       showVideos: this.showVideos,
       revealSensitive: this.revealSensitive,
       autoEmbeds: this.autoEmbeds,
+      profileInPager: this.profileInPager,
       oneTap: this.oneTap,
     };
   }

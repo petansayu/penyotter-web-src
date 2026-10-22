@@ -1,3 +1,4 @@
+import { reactionHidden } from "./hiddenMessages";
 import { isHex64, newer, type Event } from "../nostr/events";
 
 /** リアクションの絵文字（Android 版の EmojiPalette・EmojiCatalogParser・CustomEmoji）。 */
@@ -69,12 +70,17 @@ export function resolveCatalog(list: Event, sets: Event[]): CustomEmoji[] {
   }).slice(0, MAX_CATALOG);
 }
 
-/** リアクションの見せ方: 「+」と空はいいね（ハート）、`:名前:` は emoji タグの画像、ほかはその文字。 */
-export function reactionDisplay(reaction: Event): { type: "like" } | { type: "image"; url: string; shortcode: string } | { type: "text"; text: string } {
-  const content = reaction.content.trim();
-  if (!content || content === "+") return { type: "like" };
+/**
+ * リアクションの見せ方: 「+」と空はいいね（ハート）、`:名前:` は emoji タグの画像、ほかはその文字。隠しメッセージ
+ * （セクシー餃子）が付いていれば、見える絵文字で決めて hidden にメッセージを入れる。
+ */
+export function reactionDisplay(reaction: Event): ({ type: "like" } | { type: "image"; url: string; shortcode: string } | { type: "text"; text: string }) & { hidden?: string } {
+  const secret = reactionHidden(reaction.content.trim());
+  const content = secret ? secret.visible : reaction.content.trim();
+  const extra = secret ? { hidden: secret.message } : {};
+  if (!content || content === "+") return { type: "like", ...extra };
   const code = /^:([A-Za-z0-9_-]+):$/.exec(content)?.[1];
   const image = code ? emojiTags(reaction.tags).find((e) => e.shortcode === code) : undefined;
-  if (image) return { type: "image", url: image.url, shortcode: image.shortcode };
-  return { type: "text", text: content.slice(0, 32) };
+  if (image) return { type: "image", url: image.url, shortcode: image.shortcode, ...extra };
+  return { type: "text", text: content.slice(0, 32), ...extra };
 }

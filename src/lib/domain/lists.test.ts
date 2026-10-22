@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Event } from "../nostr/events";
-import { confirmReason, diffTags, nextCreatedAt, restoreList, suspiciousDrop, withoutTag, withTag } from "./lists";
+import { confirmReason, diffTags, nextCreatedAt, restoreList, suspiciousDrop, withoutTag, withTag, petnames, withPetname } from "./lists";
 
 const hex = (n: number) => n.toString(16).padStart(64, "0");
 const list = (tags: string[][], created_at = 100, content = ""): Event => ({ id: hex(999), pubkey: hex(1), created_at, kind: 3, tags, content, sig: "" });
@@ -46,5 +46,17 @@ describe("置き換え可能な一覧", () => {
     const old = list([["p", hex(2)], ["p", hex(3)], ["d", "x"]], 100, "昔");
     expect(restoreList(current, old, "merge", 150)).toMatchObject({ created_at: 201, content: "今", tags: [["p", hex(1)], ["p", hex(2)], ["p", hex(3)]] });
     expect(restoreList(current, old, "exact", 300)).toMatchObject({ created_at: 300, content: "昔", tags: old.tags });
+  });
+});
+
+describe("ペットネーム", () => {
+  const A = "a".repeat(64);
+  const B = "b".repeat(64);
+  it("p タグの 4 つ目を読み、書き換えるときはリレーのヒントを残す", () => {
+    const list = { id: "1".repeat(64), pubkey: B, created_at: 1, kind: 3, tags: [["p", A, "wss://r.test", " ぺぇ "], ["p", B]], content: "", sig: "" };
+    expect([...petnames(list)]).toEqual([[A, "ぺぇ"]]);
+    expect(withPetname(list.tags, A, "まぬぺ")[0]).toEqual(["p", A, "wss://r.test", "まぬぺ"]);
+    expect(withPetname(list.tags, B, "x")[1]).toEqual(["p", B, "", "x"]);
+    expect(() => withPetname(list.tags, "c".repeat(64), "x")).toThrow();
   });
 });

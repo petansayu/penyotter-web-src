@@ -1,3 +1,4 @@
+import { MAX_HIDDEN_BYTES, reactionHidden } from "./hiddenMessages";
 import { nip19, type EventTemplate } from "nostr-tools";
 import { isHex64, tagValue, type Event } from "../nostr/events";
 import { address } from "./threads";
@@ -84,9 +85,13 @@ export function buildEvent(author: string, draft: Draft, now: number, options: {
   if (draft.mode !== "like" && !body.trim()) throw new Error("本文を入力してください");
   if (draft.mode === "like") {
     // リアクションは「+」、絵文字（32 文字まで）、またはカスタム絵文字の :名前:
-    if (!body.trim() || body.length > 32 || /\s/.test(body)) throw new Error("リアクションを 1 つ選んでください");
-    if (draft.emoji && body !== `:${draft.emoji.shortcode}:`) throw new Error("カスタム絵文字の名前が合いません");
-    if (!draft.emoji && /^:[A-Za-z0-9_-]+:$/.test(body)) throw new Error("カスタム絵文字の画像がありません");
+    // 隠しメッセージ（セクシー餃子）付きなら、見える絵文字で確かめる（Android 版の Reactions.valid）
+    const secret = reactionHidden(body);
+    if (secret && new TextEncoder().encode(secret.message).length > MAX_HIDDEN_BYTES) throw new Error(`隠すメッセージは ${MAX_HIDDEN_BYTES} バイトまでです`);
+    const shown = secret ? secret.visible : body;
+    if (!shown.trim() || shown.length > 32 || /\s/.test(shown)) throw new Error("リアクションを 1 つ選んでください");
+    if (draft.emoji && shown !== `:${draft.emoji.shortcode}:`) throw new Error("カスタム絵文字の名前が合いません");
+    if (!draft.emoji && /^:[A-Za-z0-9_-]+:$/.test(shown)) throw new Error("カスタム絵文字の画像がありません");
   }
   if (body.length > MAX_BODY) throw new Error(`本文は ${MAX_BODY.toLocaleString("en-US")} 文字までです`);
   const target = draft.target;

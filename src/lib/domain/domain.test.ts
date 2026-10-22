@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { nip19, type Event } from "nostr-tools";
 import { parseRelayList } from "../nostr/outbox";
 import { normalizeRelay, publicRelay } from "../nostr/relayUrl";
-import { mediaOf, quoteCardId, segments, withoutMedia, withoutQuoteLink } from "./content";
+import { mediaOf, quoteCardId, quoteCards, segments, withoutMedia, withoutQuoteLink } from "./content";
 import { chain, parent, root } from "./threads";
 
 const A = "a".repeat(64);
@@ -42,6 +42,18 @@ describe("content", () => {
     expect(quoteCardId(note)).toBe(B);
     expect(withoutQuoteLink(note.content, B)).toBe("これ");
     expect(quoteCardId(event({ tags: [["q", C]], content: "x" }))).toBe(C);
+  });
+  it("引用カードは q タグと本文のどこかの note・nevent を 3 件まで（Android 版の Quotes.cards）", () => {
+    const ids = ["1", "2", "3", "4"].map((d) => d.repeat(64));
+    const note = event({ tags: [["q", ids[0], "wss://q.test", B]], content: `前 nostr:${nip19.noteEncode(ids[1])} 中 nostr:${nip19.neventEncode({ id: ids[2], relays: ["wss://n.test"] })}
+nostr:${nip19.noteEncode(ids[3])}
+nostr:${nip19.noteEncode(ids[0])}` });
+    const cards = quoteCards(note);
+    expect(cards.map((c) => c.id)).toEqual(ids.slice(0, 3));
+    expect(cards[0]).toMatchObject({ relays: ["wss://q.test"], author: B });
+    expect(cards[2].relays).toEqual(["wss://n.test"]);
+    expect(withoutQuoteLink(note.content, cards.map((c) => c.id))).toBe(`前 中
+nostr:${nip19.noteEncode(ids[3])}`);
   });
   it("本文を分ける", () => {
     const npub = nip19.npubEncode(B);

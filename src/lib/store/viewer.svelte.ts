@@ -1,3 +1,4 @@
+import { petnames } from "../domain/lists";
 import { nip05, nip19 } from "nostr-tools";
 import { isHex64, latest, type Event } from "../nostr/events";
 import { DEFAULT_RELAYS, INDEXER_RELAYS, loadRelayLists, parseRelayList, relayLists, type RelayList } from "../nostr/outbox";
@@ -54,6 +55,8 @@ class Viewer {
   /** 今使っているフォロー一覧（kind 3）とミュート一覧（kind 10000）。書き換えの元にはせず、毎回取り直す（lists）。 */
   contactList = $state<Event>();
   muteList = $state<Event>();
+  /** フォロー一覧のペットネーム（相手の公開鍵 → 名前）。 */
+  petnames = $derived(petnames(this.contactList));
   /** 公開ブックマーク（kind 10003）。 */
   bookmarkList = $state<Event>();
   /** ブックマークした投稿の ID（`e`）と、記事などのアドレス（`a`）。 */

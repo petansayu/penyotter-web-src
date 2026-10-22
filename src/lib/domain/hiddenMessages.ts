@@ -57,11 +57,15 @@ export function splitHidden(text: string): HiddenPiece[] {
       bytes.push(b);
       i++;
     }
-    const message = decode(bytes, code, runStart > 0 ? chars[runStart - 1] : null);
+    // ❤️（U+2764 U+FE0F）のように、絵文字の見た目の選択（U+FE0E・U+FE0F）は絵文字の側に含める（Android 版の HiddenMessages.find）
+    const presentation = (code === 0xfe0e || code === 0xfe0f) && bytes.length > 1;
+    const afterPresentation = presentation ? decode(bytes.slice(1), chars[runStart + 1].codePointAt(0)!, chars[runStart]) : null;
+    const message = afterPresentation ?? decode(bytes, code, runStart > 0 ? chars[runStart - 1] : null);
     if (message === null) continue;
+    const visibleEnd = afterPresentation !== null ? runStart + 1 : runStart;
     const start = Math.max(visibleStart, consumed);
     if (start > consumed) pieces.push({ type: "text", text: chars.slice(consumed, start).join("") });
-    pieces.push({ type: "hidden", visible: chars.slice(start, runStart).join(""), message });
+    pieces.push({ type: "hidden", visible: chars.slice(start, visibleEnd).join(""), message });
     consumed = i;
     visibleStart = i;
   }
@@ -95,3 +99,19 @@ export function encodeHidden(visible: string, message: string): string {
   for (const byte of new TextEncoder().encode(message)) result += String.fromCodePoint(byte < 16 ? VS_START + byte : SUPPLEMENT_START + byte - 16);
   return result;
 }
+
+/**
+ * リアクション（kind 7）の隠しメッセージ（Android 版の Reactions.hidden）。content 全体が「絵文字＋異体字セレクタ」の
+ * ときだけ。見える絵文字とメッセージ、なければ null。
+ */
+export function reactionHidden(content: string): { visible: string; message: string } | null {
+  const pieces = splitHidden(content);
+  if (pieces.length !== 1 || pieces[0].type !== "hidden" || !pieces[0].visible) return null;
+  return { visible: pieces[0].visible, message: pieces[0].message };
+}
+
+/** リアクションの見える部分（隠しメッセージを除いたもの）。 */
+export const reactionVisible = (content: string) => reactionHidden(content)?.visible ?? content;
+
+/** 押した絵文字の後ろにメッセージを隠したリアクション。「+」は見えないので ❤️ にする（Android 版の Reactions.withHidden）。 */
+export const withHiddenReaction = (content: string, message: string) => encodeHidden(content === "+" ? "❤️" : content, message);

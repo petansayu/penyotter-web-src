@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { nip19, type Event } from "nostr-tools";
+import { encodeHidden } from "./hiddenMessages";
 import { actionLines, bolt11Msats, eligible, formatSats, notificationGroups, notificationTarget, notificationType, sats, zapReceipt } from "./notifications";
 
 const ME = "a".repeat(64);
@@ -49,7 +50,7 @@ describe("まとめ方", () => {
     const repost = event({ kind: 6, tags: [["e", POST], ["p", ME]] });
     const groups = notificationGroups([reply, like1, like2, repost], ME, { type: "all" });
     expect(groups.map((g) => g.key)).toEqual([`actions:${POST}`, `reply:${reply.id}`]);
-    expect(actionLines(groups[0])).toEqual([{ type: "reposts", actors: [OTHER] }, { type: "reaction", content: "+", emoji: null, actors: [THIRD, OTHER] }]);
+    expect(actionLines(groups[0])).toEqual([{ type: "reposts", actors: [OTHER] }, { type: "reaction", content: "+", emoji: null, actors: [THIRD, OTHER], hidden: [] }]);
     const separate = notificationGroups([reply, like1, like2, repost], ME, { type: "all", separate: new Set([repost.id]) });
     expect(separate.map((g) => g.kind)).toEqual(["action", "actions", "reply"]);
   });
@@ -73,5 +74,16 @@ describe("zap の金額", () => {
     expect(bolt11Msats("nonsense")).toBeNull();
     expect(formatSats(sats(1_234_000))).toBe("1,234 sats");
     expect(formatSats(null)).toBe("金額不明");
+  });
+});
+
+describe("隠しメッセージ付きのリアクション", () => {
+  it("見える絵文字でまとめ、メッセージは誰のものか添える", () => {
+    const plain = event({ kind: 7, pubkey: OTHER, content: "❤️", tags: [["p", ME], ["e", POST]] });
+    const secret = event({ kind: 7, pubkey: THIRD, content: encodeHidden("❤️", "すき"), tags: [["p", ME], ["e", POST]] });
+    const [group] = notificationGroups([plain, secret], ME, { type: "all" });
+    const lines = actionLines(group).filter((line) => line.type === "reaction");
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({ content: "❤️", actors: expect.arrayContaining([OTHER, THIRD]), hidden: [{ actor: THIRD, message: "すき" }] });
   });
 });
