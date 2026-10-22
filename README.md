@@ -60,4 +60,6 @@ Svelte 5（runes）＋ TypeScript ＋ Vite。鍵・NIP-19・署名の確認は n
 
 MIT License（`LICENSE`）。使っている部品のライセンスは、アプリの「設定」→「このアプリについて」で見られます（ビルドのときに `dist/licenses.txt` に書き出します）。
 
-カラム表示の操作は Rabbit（syusui-s/rabbit）を参考にしましたが、Rabbit のコードは使っていません。
+## 謝辞
+
+カラム表示の操作は Rabbit（syusui-s/rabbit）を参考にさせてもらいました。ありがとうございます。
