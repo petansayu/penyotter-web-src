@@ -10,6 +10,7 @@ import { keepNotes, notes, requestProfiles } from "./cache.svelte";
 import { readEvents, readScope, saveScope, type Scope } from "./db";
 import { deletedNotes, droppedNotes, requestRepostDeletions } from "./interactions.svelte";
 import { viewer } from "./viewer.svelte";
+import { isMuted } from "./mutes";
 
 /** 一覧の 1 枚。repost があれば、そのリポストで出ている投稿。reaction があれば、そのリアクションの先の投稿。 */
 export interface Card { key: string; note: Event; repost?: Event; reaction?: Event }
@@ -37,10 +38,7 @@ export interface FeedSource {
 
 /** ミュートは読むときに除く（技術資料 5.1）。 */
 function muted(card: Card): boolean {
-  const people = viewer.mutedPubkeys;
-  const posts = viewer.mutedEvents;
-  if (people.has(card.note.pubkey) || (card.repost && people.has(card.repost.pubkey))) return true;
-  return posts.has(card.note.id) || posts.has(root(card.note));
+  return isMuted(card.note) || (!!card.repost && viewer.mutedPubkeys.has(card.repost.pubkey));
 }
 
 /**
@@ -60,6 +58,8 @@ export class Feed {
   private flushTimer: ReturnType<typeof setTimeout> | undefined;
   /** start を呼んだか。保存分だけを出している間（リレーのリストを読む前）は、続きを読まない。 */
   private started = false;
+  /** start・stop の回数。読み込みの途中で止めた・始め直したときに、古い start が購読を始めないようにする。 */
+  private runs = 0;
 
   constructor(private readonly shown: number[], private readonly source: FeedSource) {}
 
@@ -110,16 +110,20 @@ export class Feed {
   async start() {
     this.stop();
     this.started = true;
+    this.pending = [];
     this.until = undefined;
     this.limit = 100;
     this.emptyRuns = 0;
     this.finished = false;
+    const run = this.runs;
     const started = Math.floor(Date.now() / 1000);
     await this.more();
-    this.stopLive = this.source.live?.(started - 30, (event) => this.queue(event));
+    if (run !== this.runs) return;
+    this.stopLive = this.source.live?.(started - 30, (event) => this.receive(event));
   }
 
   stop() {
+    this.runs++;
     this.stopLive?.();
     this.stopLive = undefined;
     clearTimeout(this.flushTimer);
@@ -156,6 +160,28 @@ export class Feed {
     } finally {
       this.loading = false;
     }
+  }
+
+  /**
+   * 購読で届いたもののうち、まだ出していないもの（Android 版の FeedBuffer の pending）。読んでいる途中（hold が真）は
+   * 一覧に入れずにためておき、「新着 N 件」を押したら出す。一番上を見ているときは、そのまま入れる。
+   */
+  pending = $state<Event[]>([]);
+  hold: () => boolean = () => false;
+
+  private receive(event: Event) {
+    if (this.hold() && !this.events.has(event.id)) {
+      if (!this.pending.some((e) => e.id === event.id)) this.pending = [...this.pending, event];
+      return;
+    }
+    this.queue(event);
+  }
+
+  /** ためた分を出す。 */
+  reveal() {
+    const events = this.pending;
+    this.pending = [];
+    for (const event of events) this.queue(event);
   }
 
   /** 自分で送って受理された投稿を、リレーから届くのを待たずに入れる。 */

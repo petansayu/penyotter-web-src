@@ -21,6 +21,9 @@
   import { lists } from "../store/lists.svelte";
   import { viewer } from "../store/viewer.svelte";
   import Avatar from "./Avatar.svelte";
+  import BadgeDetail from "./BadgeDetail.svelte";
+  import PostCalendar from "./PostCalendar.svelte";
+  import { badges as badgeStore } from "../store/badges.svelte";
   import Content from "./Content.svelte";
   import Icon from "./Icon.svelte";
   import ProfileEditor from "./ProfileEditor.svelte";
@@ -60,6 +63,10 @@
 
   let pinned = $state<Event[]>([]);
   let badges = $state<Badge[]>([]);
+  let createdBadges = $state<Badge[]>([]);
+  let calendarOpen = $state(false);
+  /** 詳細を開いているバッジ。 */
+  let openedBadge = $state<Badge | null>(null);
   let followingIds = $state<string[] | null>(null);
   let followerCount = $state<{ count: number; approximate: boolean } | null>(null);
   let followerIds = $state<string[] | null>(null);
@@ -124,6 +131,8 @@
       articles = undefined;
       pinned = [];
       badges = [];
+      createdBadges = [];
+      openedBadge = null;
       followingIds = null;
       followerCount = null;
       followerIds = null;
@@ -134,6 +143,7 @@
       requestStatuses([key]);
       void loadPinned(key, hints).then((r) => key === pubkey && (pinned = r)).catch(() => {});
       void loadBadges(key, hints).then((r) => key === pubkey && (badges = r)).catch(() => {});
+      void badgeStore.created(key, hints).then((r) => key === pubkey && (createdBadges = r)).catch(() => {});
       void loadFollowing(key, hints).then((r) => key === pubkey && (followingIds = r.complete ? r.ids : null));
       void countFollowers(key).then((r) => key === pubkey && (followerCount = r));
       void fetchFromAuthor(key, [{ kinds: [0], authors: [key], limit: 1 }], viewer.readRelays, hints).then((fetched) =>
@@ -160,8 +170,10 @@
     {#if viewer.canSign && self && !editing}
       <div class="buttons">
         <button type="button" class="outline" onclick={() => (editing = true)}>プロフィールを編集</button>
+        <a class="outline badges-link" href="#/badges">バッジ</a>
       </div>
     {/if}
+    {#if muted}<p class="muted-banner">ミュートしているユーザーです。ほかの画面では、この人の投稿を出しません。</p>{/if}
     {#if viewer.canSign && !self}
       <div class="buttons">
         {#if following}
@@ -209,14 +221,27 @@
     {#if badges.length > 0}
       <div class="badges">
         {#each badges as badge (badge.address)}
-          <span class="badge-item" title={badge.description ? `${badge.name}\n${badge.description}` : badge.name}>
+          <button type="button" class="badge-item" title={badge.description ? `${badge.name}\n${badge.description}` : badge.name} onclick={() => (openedBadge = badge)}>
             {#if badge.thumb}<img src={badge.thumb} alt={badge.name} referrerpolicy="no-referrer" loading="lazy" />{:else}<span class="badge-name">{badge.name}</span>{/if}
-          </span>
+          </button>
         {/each}
       </div>
     {/if}
+    {#if createdBadges.length > 0}
+      <div class="muted small">作ったバッジ（{createdBadges.length}）</div>
+      <div class="badges created-badges">
+        {#each createdBadges as badge (badge.address)}
+          <button type="button" class="badge-item" title={badge.name} onclick={() => (openedBadge = badge)}>
+            {#if badge.thumb}<img src={badge.thumb} alt={badge.name} referrerpolicy="no-referrer" loading="lazy" />{:else}<span class="badge-name">{badge.name}</span>{/if}
+          </button>
+        {/each}
+      </div>
+    {/if}
+    {#if openedBadge}<BadgeDetail badge={openedBadge} awardedAt={openedBadge.awardedAt} close={() => (openedBadge = null)} />{/if}
     {#if profile?.lud16}<div class="muted small">⚡ {profile.lud16}</div>{/if}
     {#if profile?.website}<a href={profile.website} target="_blank" rel="noopener noreferrer nofollow">{profile.website}</a>{/if}
+    <button type="button" class="calendar-button" onclick={() => (calendarOpen = true)}>投稿カレンダー</button>
+    {#if calendarOpen}<PostCalendar {pubkey} close={() => (calendarOpen = false)} />{/if}
     <div class="counts">
       <button type="button" onclick={() => select("following")}><strong>{followingIds ? followingIds.length : "—"}</strong> フォロー</button>
       <button type="button" onclick={() => select("followers")}><strong>{followerCount ? `${followerCount.approximate ? "約" : ""}${followerCount.count}` : "—"}</strong> フォロワー</button>
@@ -278,6 +303,35 @@
 {/if}
 
 <style>
+  .calendar-button {
+    display: block;
+    margin: 6px 0;
+    padding: 4px 12px;
+    font: inherit;
+    font-size: 0.85em;
+    color: var(--primary);
+    background: none;
+    border: 1px solid var(--outline);
+    border-radius: 999px;
+    cursor: pointer;
+  }
+  .badges-link {
+    display: inline-flex;
+    align-items: center;
+    padding: 6px 14px;
+    border: 1px solid var(--outline);
+    border-radius: 999px;
+    color: var(--primary);
+    text-decoration: none;
+  }
+  .muted-banner {
+    margin: 8px 0;
+    padding: 8px 12px;
+    border-radius: 10px;
+    background: var(--surface-low);
+    color: var(--muted);
+    font-size: 0.85em;
+  }
   .banner {
     display: block;
     width: 100%;
@@ -442,6 +496,14 @@
     flex-wrap: wrap;
     gap: 6px;
     margin: 6px 0;
+  }
+  .badge-item {
+    padding: 0;
+    font: inherit;
+    color: inherit;
+    background: none;
+    border: none;
+    cursor: pointer;
   }
   .badge-item img {
     width: 32px;

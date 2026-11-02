@@ -16,6 +16,9 @@
   import { settings } from "../store/settings.svelte";
   import { plainTap } from "./tap";
   import { fullTime, postTime } from "./time";
+  import PackEmoji from "./PackEmoji.svelte";
+  import { awardedAddresses } from "../domain/badges";
+  import { badges } from "../store/badges.svelte";
 
   /** 通知 1 枚（Android 版の NotificationCard）。返信・引用はその投稿、反応はまとめた行と対象の投稿。 */
   let { group, me }: { group: NotificationGroup; me: string } = $props();
@@ -55,6 +58,11 @@
     return () => observer.disconnect();
   });
 
+  // バッジの通知は、その定義（名前・画像）を読む
+  $effect(() => {
+    if (group.kind === "badge") badges.request(awardedAddresses(group.events[0], me));
+  });
+
   /** 投稿の 2 行の要約。 */
   function summary(note: Event) {
     const body = withoutQuoteLink(withoutMedia(note.content, mediaOf(note)), quoteCards(note).map((q) => q.id)).replace(/\s+/g, " ").trim();
@@ -86,11 +94,11 @@
   }
 </script>
 
-{#snippet head(icon: "reply" | "formatQuote" | null, text: string | null)}
+{#snippet head(icon: "reply" | "formatQuote" | "militaryTech" | null, text: string | null)}
   <div class="label">
     <span class="dot" class:unread></span>
     {#if icon}<Icon name={icon} size={14} />{/if}
-    <span class="text">{[text, group.kind === "actions" || group.kind === "action" ? postTime(group.time, settings.timeDisplay, clock.now) : null].filter(Boolean).join(" · ")}</span>
+    <span class="text">{[text, group.kind === "actions" || group.kind === "action" || group.kind === "badge" ? postTime(group.time, settings.timeDisplay, clock.now) : null].filter(Boolean).join(" · ")}</span>
     {#if zapCount > 1 && totalSats > 0}<span class="zap-total">合計 {formatSats(totalSats)}</span>{/if}
   </div>
 {/snippet}
@@ -104,7 +112,7 @@
         <HiddenMessage visible={item.content} message={item.hidden.map((h) => `${displayName(h.actor)}: ${h.message}`).join("\n")} dialog>
           {#if item.emoji}<img class="emoji" src={item.emoji} alt={item.content} referrerpolicy="no-referrer" />{:else}<span class="reaction">{item.content}</span>{/if}
         </HiddenMessage>
-      {:else if item.emoji}<img class="emoji" src={item.emoji} alt={item.content} title={item.content} referrerpolicy="no-referrer" />
+      {:else if item.emoji}<PackEmoji class="emoji" shortcode={item.content.slice(1, -1)} url={item.emoji} tags={item.tags ?? []} owner={item.actors[0] ?? null} />
       {:else if item.content === "+"}<Icon name="favoriteBorder" size={20} label="いいね" />
       {:else}<span class="reaction">{item.content}</span>{/if}
     </span>
@@ -129,7 +137,22 @@
 <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
 <div class="card" class:tappable={group.kind !== "reply" && group.kind !== "quote" && !!group.target} bind:this={element} data-unread={unread}
   onclick={(event) => { if (group.kind !== "reply" && group.kind !== "quote" && group.target && plainTap(event)) void openTarget(); }}>
-  {#if group.kind === "reply" || group.kind === "quote"}
+  {#if group.kind === "badge"}
+    <!-- もらったバッジ（NIP-58）。押すと自分のバッジの画面（Android 版の BadgeAwardCard） -->
+    {@const award = group.events[0]}
+    {@const address = awardedAddresses(award, me)[0]}
+    {@const badge = address ? badges.definitions.get(address) : undefined}
+    {@render head("militaryTech", "バッジ")}
+    <a class="badge-award" href="#/badges">
+      <span class="badge-picture">{#if badge?.thumb}<img src={badge.thumb} alt="" referrerpolicy="no-referrer" loading="lazy" />{:else}🏅{/if}</span>
+      <span class="badge-text">
+        <small>{displayName(award.pubkey)}さんからバッジをもらいました</small>
+        <strong>{badge?.name ?? "バッジを読み込んでいます"}</strong>
+        {#if badge?.description}<small>{badge.description}</small>{/if}
+        <small class="badge-hint">押すと、プロフィールに飾るバッジを選べます</small>
+      </span>
+    </a>
+  {:else if group.kind === "reply" || group.kind === "quote"}
     {@render head(group.kind === "quote" ? "formatQuote" : "reply", label)}
     <NoteCard note={group.events[0]} />
   {:else}
@@ -157,6 +180,43 @@
 </div>
 
 <style>
+  .badge-award {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 6px 12px 10px 24px;
+    color: var(--text);
+    text-decoration: none;
+  }
+  .badge-picture {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 48px;
+    height: 48px;
+    overflow: hidden;
+    border-radius: 10px;
+    background: var(--surface-low);
+    font-size: 22px;
+  }
+  .badge-picture img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .badge-text {
+    display: grid;
+    min-width: 0;
+  }
+  .badge-text small {
+    color: var(--muted);
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .badge-text .badge-hint {
+    color: var(--primary);
+  }
   .card {
     border-bottom: 1px solid var(--outline-variant);
     padding-top: 6px;
@@ -215,7 +275,8 @@
     overflow: hidden;
     white-space: nowrap;
   }
-  .emoji {
+  .emoji,
+  .mark :global(.pack-emoji img) {
     height: 22px;
     max-width: 44px;
     object-fit: contain;

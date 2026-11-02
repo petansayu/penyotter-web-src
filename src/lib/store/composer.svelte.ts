@@ -1,3 +1,5 @@
+import { peusa } from "./peusa.svelte";
+import type { CustomEmoji } from "../domain/emojis";
 import { home } from "./home.svelte";
 import { loadRelayLists, writeRelays } from "../nostr/outbox";
 import { relaySet } from "../nostr/relayUrl";
@@ -55,10 +57,10 @@ class Composer {
   remoteMessage = $state<string | null>(null);
   remoteBusy = $state(false);
   /** 絵文字のパレットから入れたカスタム絵文字（送るときに emoji タグにする）。 */
-  private picked: { shortcode: string; url: string }[] = [];
+  private picked: CustomEmoji[] = [];
 
   /** カスタム絵文字を本文に入れたら覚える。 */
-  rememberEmoji(emoji: { shortcode: string; url: string }) {
+  rememberEmoji(emoji: CustomEmoji) {
     this.picked = [emoji, ...this.picked.filter((e) => e.shortcode !== emoji.shortcode)];
   }
 
@@ -198,6 +200,41 @@ class Composer {
     return MAX_BODY - this.text.length;
   }
 
+  /**
+   * このブラウザに残っている書きかけ（通常の投稿・返信・引用ごと。Android 版の「保存した下書き」の「この端末」）。
+   * localStorage の composer-draft.<公開鍵>.<欄> を読む。
+   */
+  localDrafts(): { mode: Mode; target: string | null; text: string }[] {
+    const me = viewer.pubkey;
+    if (!me) return [];
+    const prefix = `composer-draft.${me}.`;
+    const result: { mode: Mode; target: string | null; text: string }[] = [];
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (!key?.startsWith(prefix)) continue;
+        const text = localStorage.getItem(key) ?? "";
+        if (!text.trim()) continue;
+        const slot = key.slice(prefix.length);
+        const [mode, target] = slot === "post" ? ["post", null] : slot.split(":");
+        if ((mode === "post" || mode === "reply" || mode === "quote") && (mode === "post" || /^[0-9a-f]{64}$/.test(target ?? ""))) result.push({ mode: mode as Mode, target, text });
+      }
+    } catch {
+      // 読めなければ出さない
+    }
+    return result;
+  }
+
+  /** このブラウザの書きかけを開く。返信・引用は相手の投稿を読んでから開く。 */
+  async openLocalDraft(draft: { mode: Mode; target: string | null }) {
+    const target = draft.target ? await requestNote(draft.target) : null;
+    if (draft.mode !== "post" && !target) {
+      this.remoteMessage = "返信先・引用元の投稿を読み込めませんでした";
+      return;
+    }
+    this.show(draft.mode, target ?? undefined);
+  }
+
   /** 書きかけの保存先（Android 版の下書きの欄と同じく、普通の投稿・返信先・引用元ごと）。 */
   private draftKey() {
     const slot = this.mode === "post" || !this.target ? "post" : `${this.mode}:${this.target.id}`;
@@ -271,6 +308,7 @@ class Composer {
       this.message = summary(result);
       if (result.accepted > 0) {
         keepNotes([signed]);
+        peusa.celebrate("posted");
         // ホームのフォロー中にもすぐ出す（自分の書き込みリレーを読んでいなくても見えるように）
         if (signed.pubkey === viewer.pubkey) home.following?.add([signed]);
         this.unsent = null;
@@ -285,18 +323,15 @@ class Composer {
         const remote = this.remote;
         this.remote = null;
         if (remote) void deleteRemoteDraft(remote.identifier, remote.kind).catch(() => toast.show("リレーの下書きを消せませんでした"));
-        // 返信・引用が受理されたら、普通の投稿の欄に戻す（Android 版 0.180.0 と同じ）
-        // スマホ（指で操作する画面）では、普通の投稿でも欄を閉じ、キーボードも閉じる（利用者の要望、2026-10-22）
-        const touch = window.matchMedia("(pointer: coarse)").matches;
-        if (this.mode !== "post" || touch) {
-          this.mode = "post";
-          this.target = undefined;
-          this.open = false;
-          this.poster = null;
-          if (touch && document.activeElement instanceof HTMLElement) document.activeElement.blur();
-          // 欄を閉じるので、結果はトーストで知らせる
-          toast.show(this.message);
-        }
+        // 受理されたら、普通の投稿の欄に戻して欄を閉じ、スマホではキーボードも閉じる（返信・引用は Android 版 0.180.0 と同じ。
+        // 普通の投稿でも閉じるのは利用者の要望、スマホは 2026-10-22・パソコンも 2026-10-23）
+        this.mode = "post";
+        this.target = undefined;
+        this.open = false;
+        this.poster = null;
+        if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+        // 欄を閉じるので、結果はトーストで知らせる
+        toast.show(this.message);
       }
     } catch (e) {
       this.message = e instanceof SignerError || e instanceof Error ? e.message : String(e);

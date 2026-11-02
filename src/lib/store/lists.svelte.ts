@@ -1,13 +1,14 @@
 import { emojis } from "./emojis.svelte";
 import type { EventTemplate } from "nostr-tools";
 import { confirmReason, diffTags, nextList, restoreList, suspiciousDrop, tagKey, withoutTag, withTag, type ConfirmReason, type ListDiff, type RestoreMode, withPetname } from "../domain/lists";
-import { latest, newer, type Event } from "../nostr/events";
-import { delay, eventsOf, pool, publish, type PublishResult } from "../nostr/pool";
+import { latest, newer, type Event, type Filter } from "../nostr/events";
+import { delay, eventsOf, pool, publish, type Fetched, type PublishResult } from "../nostr/pool";
 import { relaySet } from "../nostr/relayUrl";
 import { latestVersion, recordVersion, type HistorySource } from "./listHistory";
 import { summary } from "./publishSummary";
 import { toast } from "./toast.svelte";
 import { viewer } from "./viewer.svelte";
+import { LEGACY_PROFILE_BADGES, profileBadgeList, profileBadgeTags } from "../domain/badges";
 
 /**
  * フォロー一覧（kind 3）とミュート一覧（kind 10000）の書き換え（技術資料 7 章、Android 版の ListGuard・
@@ -15,8 +16,8 @@ import { viewer } from "./viewer.svelte";
  * 取り直しが完了しなければやめる。危ない変更は先に聞き、元の版と署名した版を履歴に残してから送る。
  */
 
-export type ListKind = 3 | 10000 | 10003 | 10030;
-const LIST_NAMES: Record<ListKind, string> = { 3: "フォロー一覧", 10000: "ミュート一覧", 10003: "ブックマーク", 10030: "絵文字リスト" };
+export type ListKind = 3 | 10000 | 10003 | 10008 | 10030;
+const LIST_NAMES: Record<ListKind, string> = { 3: "フォロー一覧", 10000: "ミュート一覧", 10003: "ブックマーク", 10008: "プロフィールのバッジ", 10030: "絵文字リスト" };
 
 export interface Confirmation {
   kind: ListKind;
@@ -136,6 +137,14 @@ class Lists {
   }
 
   /** 履歴の版から戻す（技術資料 7.4）。差は画面で見てから選ぶが、条件に当たれば確認も出す。 */
+  /**
+   * プロフィールに飾るバッジ（kind 10008）を pairs（定義のアドレス, 授与の ID）の順にする（Android 版の
+   * ProfileBadgeService）。前の一覧が kind 30008 なら、それを元に kind 10008 にする。
+   */
+  setProfileBadges(pairs: [string, string][]) {
+    return this.run(10008, (base) => nextList(10008, base, profileBadgeTags(base, pairs), now()), false, "local");
+  }
+
   restore(old: Event, mode: RestoreMode) {
     const kind = old.kind as ListKind;
     return this.run(kind, (base) => restoreList(base, old, mode, now()), false, "before-restore");
@@ -172,10 +181,11 @@ class Lists {
     const name = LIST_NAMES[kind];
     // 1. 読み込み＋書き込みリレーから取り直す。完了しなければやめる（取れなかったことを「ない」と取り違えない）
     const relays = relaySet([...viewer.readRelays, ...viewer.writeRelays]);
-    const fetched = await pool.fetch(relays, [{ kinds: [kind], authors: [me], limit: 5 }]);
+    // プロフィールのバッジは、前の形（kind 30008）も読む
+    const fetched = await fetchLatest(relays, [{ kinds: kind === 10008 ? [10008, LEGACY_PROFILE_BADGES] : [kind], authors: [me], limit: 5 }]);
     if (!fetched.complete) throw new Error(`${name}をリレーから取り直せなかったので、変更をやめました。少し待ってからもう一度試してください。`);
     // 2. リレーの版・このブラウザが知っている版・送信待ちのうち、いちばん新しいものを元にする
-    const fromRelays = latest(eventsOf(fetched).filter((event) => event.pubkey === me && event.kind === kind));
+    const fromRelays = kind === 10008 ? profileBadgeList(eventsOf(fetched), me) : latest(eventsOf(fetched).filter((event) => event.pubkey === me && event.kind === kind));
     const known = await latestVersion(me, kind);
     const pending = readPending(me, kind);
     const base = latest([fromRelays, known, pending].filter((event): event is Event => !!event));
@@ -187,7 +197,8 @@ class Lists {
     const template = build(base);
     const same = pending && base === pending && sameTags(pending.tags, template.tags) && pending.content === template.content;
     // 5. 危ない変更は先に聞く
-    const reason = confirmReason(base, template.tags, single);
+    // 最初のバッジを飾るときは一覧を作るのが当たり前なので聞かない（Android 版と同じ）
+    const reason = kind === 10008 && !base ? null : confirmReason(base, template.tags, single);
     if (reason && !(await this.ask(kind, reason, diffTags(base?.tags ?? [], template.tags)))) return null;
     let event: Event;
     if (same) event = pending;
@@ -204,7 +215,7 @@ class Lists {
       writePending(me, kind, null);
       if (viewer.pubkey === me) {
         if (kind === 10030) void emojis.reload();
-        else viewer.applyList(kind, event);
+        else if (kind !== 10008) viewer.applyList(kind, event);
       }
       if (kind === 3) void this.checkAfter(me, event);
     }
@@ -235,6 +246,25 @@ class Lists {
       };
     });
   }
+}
+
+/**
+ * 書き換える前の取り直し（Android 版の LatestPages）。リレーは一時的に REQ を断ったり（日本のリレーは同時の REQ が
+ * 10 前後を超えると閉じる）遅れたりするので、そろわなければ少し待って 3 回まで聞き直す。途中で届いた分は残す。
+ */
+async function fetchLatest(relays: string[], filters: Filter[]): Promise<Fetched> {
+  const events: Fetched["events"] = new Map();
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) await delay(1500 * attempt);
+    const fetched = await pool.fetch(relays, filters);
+    for (const [id, entry] of fetched.events) {
+      const known = events.get(id);
+      if (known) entry.relays.forEach((relay) => known.relays.add(relay));
+      else events.set(id, entry);
+    }
+    if (fetched.complete) return { events, complete: true };
+  }
+  return { events, complete: false };
 }
 
 function sameTags(a: string[][], b: string[][]) {

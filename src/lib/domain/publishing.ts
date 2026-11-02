@@ -2,6 +2,7 @@ import { MAX_HIDDEN_BYTES, reactionHidden } from "./hiddenMessages";
 import { nip19, type EventTemplate } from "nostr-tools";
 import { isHex64, tagValue, type Event } from "../nostr/events";
 import { address } from "./threads";
+import { emojiTag, type CustomEmoji } from "./emojis";
 import { imetaTags, MAX_ATTACHMENTS, withAttachments, type Attachment } from "./media";
 
 /** 投稿するイベントの組み立て（Android 版の PostBuilder・PenyotterClient、技術資料 6.1〜6.5）。 */
@@ -19,11 +20,11 @@ export interface Draft {
   /** 返信・引用・リアクションの相手。 */
   target?: Event;
   /** カスタム絵文字のリアクション（body は `:名前:`）。 */
-  emoji?: { shortcode: string; url: string };
+  emoji?: CustomEmoji;
   /** 付ける画像・動画（本文の後ろに URL、imeta タグ）。 */
   media?: Attachment[];
   /** 本文の :名前: に使えるカスタム絵文字（本文にあるものだけ emoji タグにする。50 種類まで）。 */
-  customEmojis?: { shortcode: string; url: string }[];
+  customEmojis?: CustomEmoji[];
   /** 注意書き（NIP-36、200 文字まで）。 */
   contentWarning?: string | null;
   /** 消える投稿（NIP-40）。何秒後に消えるか。 */
@@ -124,7 +125,7 @@ export function buildEvent(author: string, draft: Draft, now: number, options: {
     tags.push(["q", target.id, "", target.pubkey], ["p", target.pubkey]);
   } else if (draft.mode === "like" && target) {
     tags.push(["e", target.id, "", target.pubkey], ["p", target.pubkey], ["k", String(target.kind)]);
-    if (draft.emoji) tags.push(["emoji", draft.emoji.shortcode, draft.emoji.url]);
+    if (draft.emoji) tags.push(emojiTag(draft.emoji));
   }
 
   const content = draft.mode === "quote" && target ? `${body.trimEnd()}\n\nnostr:${nip19.noteEncode(target.id)}` : body;
@@ -150,7 +151,7 @@ export function buildEvent(author: string, draft: Draft, now: number, options: {
       if (!used.has(emoji.shortcode) || seen.has(emoji.shortcode) || !emoji.url.startsWith("https://")) continue;
       if (seen.size >= MAX_CUSTOM_EMOJIS) throw new Error(`カスタム絵文字は ${MAX_CUSTOM_EMOJIS} 種類までです`);
       seen.add(emoji.shortcode);
-      tags.push(["emoji", emoji.shortcode, emoji.url]);
+      tags.push(emojiTag(emoji));
     }
   }
   // 消える投稿（NIP-40）。リアクションには使わない

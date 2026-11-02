@@ -1,9 +1,13 @@
 <script lang="ts">
+  import { settings } from "../store/settings.svelte";
   import type { Card } from "../store/feed.svelte";
   import { globalRelays } from "../store/global";
   import { home } from "../store/home.svelte";
   import { viewer } from "../store/viewer.svelte";
   import Timeline from "./Timeline.svelte";
+  import TopicsRow from "./TopicsRow.svelte";
+  import Icon from "./Icon.svelte";
+  import { jumpDialog } from "../store/jump.svelte";
 
   /**
    * ホームの一覧。tabs は 1 列のときのタブ付き（フォロー中・グローバル）。カラムの列では、フォロー中だけか
@@ -30,15 +34,25 @@
   <div class="home-tabs" role="tablist">
     <button type="button" role="tab" aria-selected={home.tab === "following"} class:active={home.tab === "following"} onclick={() => home.choose("following")}>フォロー中</button>
     <button type="button" role="tab" aria-selected={home.tab === "global"} class:active={home.tab === "global"} onclick={() => home.choose("global")}>グローバル</button>
+    <button type="button" class="jump" aria-label="日時を指定して見る" title="日時を指定して見る" onclick={() => (jumpDialog.open = true)}><Icon name="history" size={20} /></button>
   </div>
 {/if}
-{#if tab === "following" && home.following}<Timeline feed={home.following} empty="フォロー中の人の投稿がありません" {accept} />{/if}
+{#if tab === "following" && home.following}{#if settings.topicTools}<TopicsRow feed={home.following} tab="following" />{/if}<Timeline feed={home.following} empty="フォロー中の人の投稿がありません" {accept} bookmark="following" />{/if}
 {#if tab === "global" && home.global}
   {#if globalRelays(viewer.pubkey).length === 0}<p class="notice">グローバルは読み込みリレーから読んでいます。設定の「グローバルで読むリレー」で変えられます。</p>{/if}
-  <Timeline feed={home.global} empty="投稿がありません" {accept} />
+  {#if settings.topicTools}<TopicsRow feed={home.global} tab="global" />{/if}
+  <Timeline feed={home.global} empty="投稿がありません" {accept} bookmark="global" />
 {/if}
 
 <style>
+  .home-tabs .jump {
+    flex: none;
+    padding: 0 14px;
+    color: var(--muted);
+    background: none;
+    border: none;
+    cursor: pointer;
+  }
   .home-tabs {
     position: sticky;
     top: var(--sticky-top, 52px);

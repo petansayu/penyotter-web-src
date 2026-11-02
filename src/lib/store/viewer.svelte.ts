@@ -115,7 +115,28 @@ class Viewer {
 
   /** 常時接続リレー（読み込みリレーの先頭 6 件）。 */
   get alwaysOn(): string[] {
-    return this.readRelays.slice(0, 6);
+    return this.readRelays.slice(0, this.activeLimit);
+  }
+
+  /** 常時接続の数（読み込みリレーの先頭から。3・6・9・12、最初は 6。見る人ごとにブラウザに保存。Android 版の activeRelayLimit）。 */
+  activeLimit = $state(6);
+
+  setActiveLimit(value: number) {
+    this.activeLimit = Math.min(12, Math.max(1, value));
+    try {
+      if (this.pubkey) localStorage.setItem(`active-relays.${this.pubkey}`, String(this.activeLimit));
+    } catch {
+      // 保存できなくてもこの間は使える
+    }
+  }
+
+  private readActiveLimit(pubkey: string | null) {
+    try {
+      const saved = Number(pubkey ? localStorage.getItem(`active-relays.${pubkey}`) : NaN);
+      this.activeLimit = Number.isInteger(saved) && saved >= 1 && saved <= 12 ? saved : 6;
+    } catch {
+      this.activeLimit = 6;
+    }
   }
 
   get canSign(): boolean {
@@ -224,7 +245,7 @@ class Viewer {
     this.applyBookmarks(undefined);
     try {
       localStorage.removeItem(STORAGE_KEY);
-      if (previous) for (const key of ["notifications", "search-relays", "global-relays", "home-tab", "relay-list"]) localStorage.removeItem(`${key}.${previous}`);
+      if (previous) for (const key of ["notifications", "mute-list", "search-relays", "global-relays", "home-tab", "relay-list", "active-relays", "search-history"]) localStorage.removeItem(`${key}.${previous}`);
       if (previous) forgetRemote(previous);
     } catch {
       // 何もしない
@@ -315,12 +336,40 @@ class Viewer {
     this.muteList = event;
     this.mutedPubkeys = new Set(event ? pTags(event) : []);
     this.mutedEvents = new Set(event?.tags.filter((tag) => tag[0] === "e" && isHex64(tag[1])).map((tag) => tag[1]) ?? []);
+    // 次に開いたとき、リレーから読む前に当てられるように、このブラウザに控える
+    const me = this.pubkey;
+    if (!me || (event && event.pubkey !== me)) return;
+    try {
+      if (event) localStorage.setItem(`mute-list.${me}`, JSON.stringify(event));
+      else localStorage.removeItem(`mute-list.${me}`);
+    } catch {
+      // 控えられなくても、リレーから読めば当たる
+    }
+  }
+
+  /**
+   * 前に読んだミュート一覧を先に当てる。ホームの保存分を出す前に呼ぶ（リレーから読み終わるまで、ミュートした人の
+   * 投稿が一瞬出ないように）。
+   */
+  restoreMutes(pubkey: string) {
+    let saved: Event | null = null;
+    try {
+      saved = JSON.parse(localStorage.getItem(`mute-list.${pubkey}`) ?? "null") as Event | null;
+    } catch {
+      // 読めなければリレーから読むまで待つ
+    }
+    // 控えがなければ空にする（前に見ていた人のミュートを持ち越さない）
+    const valid = saved && saved.kind === 10000 && saved.pubkey === pubkey && Array.isArray(saved.tags) ? saved : undefined;
+    this.muteList = valid;
+    this.mutedPubkeys = new Set(valid ? pTags(valid) : []);
+    this.mutedEvents = new Set(valid?.tags.filter((tag) => tag[0] === "e" && isHex64(tag[1])).map((tag) => tag[1]) ?? []);
   }
 
   /** 自分の kind 10002・3・10000 を読む（技術資料 5.10。閲覧専用なので取り込むだけ）。 */
   async load() {
     const pubkey = this.pubkey;
     if (!pubkey) return;
+    this.readActiveLimit(pubkey);
     this.error = null;
     const lookIn = relaySet([...this.hints, ...DEFAULT_RELAYS]);
     const lists = await pool.fetch(relaySet([...lookIn, ...INDEXER_RELAYS]), [{ kinds: [10002], authors: [pubkey], limit: 5 }]);
@@ -354,11 +403,14 @@ class Viewer {
     if (this.pubkey !== pubkey) return;
     const contactList = latest(eventsOf(merge([contacts])));
     this.applyContacts(contactList);
-    this.applyMutes(latest(eventsOf(mutes)));
+    // 控えより古い版しか見つからない、または読み切れずに見つからないときは、控えのまま（ミュートが外れないように）
+    const muteList = latest(eventsOf(mutes));
+    const kept = this.muteList;
+    if (muteList ? !kept || muteList.created_at >= kept.created_at : mutes.complete) this.applyMutes(muteList);
     this.applyBookmarks(latest(eventsOf(bookmarks)));
     if (!contactList) this.error = "フォロー一覧が見つかりませんでした。";
     this.ready = true;
-    void loadRelayLists(this.follows.slice(0, 500), this.alwaysOn);
+    void loadRelayLists(this.follows, this.alwaysOn);
   }
 }
 

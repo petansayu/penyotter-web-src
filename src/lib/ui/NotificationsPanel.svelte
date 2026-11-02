@@ -1,4 +1,7 @@
 <script lang="ts">
+  import { settings } from "../store/settings.svelte";
+  import PeusaEmpty from "./PeusaEmpty.svelte";
+  import PeusaLoading from "./PeusaLoading.svelte";
   import { scrollOwnerToTop } from "./scroll";
   import { untrack } from "svelte";
   import { SvelteSet } from "svelte/reactivity";
@@ -91,7 +94,11 @@
 {#each shown as group (group.key)}
   <div class="item"><NotificationCard {group} {me} /></div>
 {:else}
-  <p class="note">{notifications.loading ? "通知を読み込んでいます" : "取得済みの通知はありません"}</p>
+  {#if settings.peusaMode}
+    {#if notifications.loading}<PeusaLoading size={96} />{:else}<PeusaEmpty picture="empty-notifications" message="取得済みの通知はありません" />{/if}
+  {:else}
+    <p class="note">{notifications.loading ? "通知を読み込んでいます" : "取得済みの通知はありません"}</p>
+  {/if}
 {/each}
 
 <div bind:this={sentinel}></div>

@@ -204,7 +204,7 @@ class Notifications {
 
   /** 読み込みリレーと、フォロー中の人の書き込みリレー（常時接続リレーは足さない）から同時に読む。 */
   private async fetchPage(filter: Filter, onEvent: (event: Event) => void): Promise<Fetched> {
-    const follows = viewer.follows.slice(0, 500);
+    const follows = viewer.follows;
     const routed = (async () => {
       if (follows.length === 0) return merge([]);
       await loadRelayLists(follows, viewer.alwaysOn);

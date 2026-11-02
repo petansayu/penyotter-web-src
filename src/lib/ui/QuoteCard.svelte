@@ -3,6 +3,9 @@
   import { notes, requestNote } from "../store/cache.svelte";
   import { threadHref } from "../router.svelte";
   import NoteCard from "./NoteCard.svelte";
+  import MutedNote from "./MutedNote.svelte";
+  import { isMuted, mutedLabel } from "../store/mutes";
+  import { settings } from "../store/settings.svelte";
 
   /** 引用カード。ID で読み、読めないときは投稿へのリンクだけ出す。 */
   let { id, relays = [], author }: { id: string; relays?: string[]; author?: string } = $props();
@@ -19,7 +22,10 @@
   });
 </script>
 
-{#if note}
+{#if note && isMuted(note)}
+  <!-- ミュートしている投稿は札にする（設定で「完全に隠す」なら出さない） -->
+  {#if !settings.hideMuted}<MutedNote label={mutedLabel(note)}><NoteCard {note} nested /></MutedNote>{/if}
+{:else if note}
   <NoteCard {note} nested />
 {:else}
   <a class="placeholder" href={threadHref(id, author, relays)}>{missing ? "引用された投稿を読み込めませんでした" : "引用された投稿を読み込んでいます…"}</a>

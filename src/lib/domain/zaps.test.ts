@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Event } from "../nostr/events";
-import { buildZapRequest, checkZapInfo, lnurlOf, lnurlpEndpoint, parseLightningAddress } from "./zaps";
+import { buildZapRequest, checkInvoice, checkZapInfo, lnurlOf, lnurlpEndpoint, parseLightningAddress } from "./zaps";
 
 describe("zap", () => {
   it("Lightning アドレスを読み、LNURL にする", () => {
@@ -17,6 +17,13 @@ describe("zap", () => {
     expect(checkZapInfo(info, 21000)).toEqual({ callback: "https://x.test/cb" });
     expect(() => checkZapInfo({ ...info, allowsNostr: false }, 21000)).toThrow();
     expect(() => checkZapInfo(info, 500000)).toThrow();
+  });
+
+  it("請求書は金額が頼んだ額と同じときだけ", () => {
+    expect(checkInvoice({ pr: "lnbc10u1pjexample" }, 1_000_000)).toBe("lnbc10u1pjexample");
+    expect(() => checkInvoice({ pr: "lnbc20u1pjexample" }, 1_000_000)).toThrow("金額");
+    expect(() => checkInvoice({ pr: "lnbc1pjexample" }, 1_000_000)).toThrow("金額");
+    expect(() => checkInvoice({ status: "ERROR", reason: "だめ" }, 1_000_000)).toThrow("だめ");
   });
 
   it("relays・amount・lnurl・p・e・k", () => {

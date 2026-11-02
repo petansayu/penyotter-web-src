@@ -1,5 +1,6 @@
 import { isHex64, type Event } from "../nostr/events";
 import type { EventTemplate } from "nostr-tools";
+import { emojiTag, type CustomEmoji } from "./emojis";
 
 /**
  * 投稿以外に作るイベント（技術資料 6.11・6.12、Android 版の StatusPosts・Polls・Vanish と通報）。
@@ -20,7 +21,7 @@ export function newestStatus(events: Iterable<Event>, me: string, type: StatusTy
 }
 
 /** 前の版のタグ（d・emoji・expiration を除く）を残して書き換える。空の content で消す。 */
-export function buildStatus(me: string, type: StatusType, base: Event | undefined, content: string, emojis: { shortcode: string; url: string }[], now: number): EventTemplate {
+export function buildStatus(me: string, type: StatusType, base: Event | undefined, content: string, emojis: CustomEmoji[], now: number): EventTemplate {
   if (!isHex64(me)) throw new Error("公開鍵の形が正しくありません");
   if (content.length > 500) throw new Error("ステータスは500文字以内で入力してください");
   if (base && base.created_at >= now + 60) throw new Error("ステータスの時刻が未来になっています。しばらく待って再試行してください");
@@ -28,7 +29,7 @@ export function buildStatus(me: string, type: StatusType, base: Event | undefine
   tags.unshift(["d", type]);
   const used = new Set([...content.matchAll(/:([A-Za-z0-9_-]+):/g)].map((m) => m[1]));
   for (const emoji of emojis) {
-    if (used.has(emoji.shortcode) && !tags.some((t) => t[0] === "emoji" && t[1] === emoji.shortcode)) tags.push(["emoji", emoji.shortcode, emoji.url]);
+    if (used.has(emoji.shortcode) && !tags.some((t) => t[0] === "emoji" && t[1] === emoji.shortcode)) tags.push(emojiTag(emoji));
   }
   return { kind: 30315, created_at: Math.max(now, (base?.created_at ?? -1) + 1), tags, content };
 }

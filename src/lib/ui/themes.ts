@@ -13,6 +13,17 @@ export interface Theme { id: string; label: string; group: Group; light: Palette
 const p = (background: string, text: string, muted: string, surface: string, primary: string, second?: string): Palette =>
   ({ background, text, muted, surface, primary, second });
 
+/** スーパーぺぇうさモードの配色（Android 版の Peusa.theme）。ぺぇうさの水色とほっぺのピンク。一覧には出さない。 */
+export const PEUSA_THEME: Theme = {
+  id: "peusa", label: "ぺぇうさ", group: "special",
+  light: p("#F5FAFF", "#1E2A33", "#5C7A90", "#DCEFFC", "#4A9AD6", "#F28BAE"),
+  dark: p("#0E1620", "#E8F2FA", "#8FB2C9", "#16283A", "#9FD3F7", "#F4A3C0"),
+  exact: {
+    light: { background: "#F5FAFF", primary: "#4A9AD6", accent: "#F28BAE", text: "#1E2A33", subText: "#5C7A90", surface: "#DCEFFC" },
+    dark: { background: "#0E1620", primary: "#9FD3F7", accent: "#F4A3C0", text: "#E8F2FA", subText: "#8FB2C9", surface: "#16283A" },
+  },
+};
+
 export const THEMES: Theme[] = [
   {
     id: "usagi", label: "うさぎ", group: "special",

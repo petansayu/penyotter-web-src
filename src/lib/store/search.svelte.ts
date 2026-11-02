@@ -10,6 +10,7 @@ import { keepNotes, keepProfiles, notes, profiles, requestProfiles } from "./cac
 import { readScope } from "./db";
 import { readRelaySetting, saveRelaySetting } from "./relaySettings";
 import { viewer } from "./viewer.svelte";
+import { isMuted } from "./mutes";
 
 /**
  * 検索（技術資料 5.6）。端末内の投稿とプロフィールから探して先に出し、そのあとリレーに問い合わせる。
@@ -44,7 +45,10 @@ export class Search {
 
   constructor(readonly query: SearchQuery, readonly filters: SearchFilters = NO_FILTERS) {}
 
-  results = $derived([...this.posts.values()].sort(byNewest));
+  // ミュートした人・投稿は出さない（タイムラインと同じ）
+  results = $derived([...this.posts.values()].filter((event) => !isMuted(event)).sort(byNewest));
+  /** 見つかった投稿のハッシュタグ（Android 版の SearchState.tags）。 */
+  tags = $derived([...new Set(this.results.flatMap((event) => event.tags.filter((tag) => tag[0] === "t" && tag[1]).map((tag) => tag[1].toLowerCase())))].slice(0, 50));
 
   async start() {
     const query = this.query;
@@ -141,5 +145,41 @@ export class Search {
 
   private update(url: string, change: Partial<RelayStatus>) {
     this.statuses = this.statuses.map((status) => (status.url === url ? { ...status, ...change } : status));
+  }
+}
+
+/** 検索の履歴（見る人ごと、新しい 10 件。Android 版の search-history）。 */
+const historyKey = (pubkey: string | null) => (pubkey ? `search-history.${pubkey}` : null);
+
+export function searchHistory(pubkey: string | null): string[] {
+  const key = historyKey(pubkey);
+  try {
+    const saved = key ? (JSON.parse(localStorage.getItem(key) ?? "[]") as unknown) : [];
+    return Array.isArray(saved) ? saved.filter((v): v is string => typeof v === "string").slice(0, 10) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function rememberSearch(pubkey: string | null, value: string): string[] {
+  const trimmed = value.trim();
+  const key = historyKey(pubkey);
+  // 秘密鍵らしいものは残さない
+  if (!key || !trimmed || /nsec1|ncryptsec1/i.test(trimmed)) return searchHistory(pubkey);
+  const next = [trimmed, ...searchHistory(pubkey).filter((v) => v !== trimmed)].slice(0, 10);
+  try {
+    localStorage.setItem(key, JSON.stringify(next));
+  } catch {
+    // 保存できなくても探せる
+  }
+  return next;
+}
+
+export function clearSearchHistory(pubkey: string | null) {
+  const key = historyKey(pubkey);
+  try {
+    if (key) localStorage.removeItem(key);
+  } catch {
+    // 何もしない
   }
 }

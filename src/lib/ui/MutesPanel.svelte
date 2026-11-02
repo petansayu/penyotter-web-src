@@ -2,6 +2,7 @@
   import { profileHref, threadHref } from "../router.svelte";
   import { displayName, requestProfiles } from "../store/cache.svelte";
   import { lists } from "../store/lists.svelte";
+  import { settings } from "../store/settings.svelte";
   import { viewer } from "../store/viewer.svelte";
   import Avatar from "./Avatar.svelte";
 
@@ -20,6 +21,13 @@
   <h2>ミュート</h2>
   {#if !viewer.ready}<p class="muted">読んでいます…</p>{/if}
   {#if hasPrivate}<p class="muted">非公開のミュート（暗号化した分）は、この画面では読みません。書き換えてもそのまま残します。</p>{/if}
+
+  <h3>ミュートした投稿の見せ方</h3>
+  <p class="muted">タイムライン・通知・検索・投稿の詳細の返信一覧では、いつも出しません。引用された投稿や返信元に出てきたときの見せ方を選べます。</p>
+  <div class="segmented" role="radiogroup" aria-label="ミュートした投稿の見せ方">
+    <button type="button" role="radio" aria-checked={!settings.hideMuted} class:active={!settings.hideMuted} onclick={() => (settings.hideMuted = false)}>「ミュート中」と表示</button>
+    <button type="button" role="radio" aria-checked={settings.hideMuted} class:active={settings.hideMuted} onclick={() => (settings.hideMuted = true)}>完全に隠す</button>
+  </div>
 
   <h3>ユーザー（{people.length}）</h3>
   {#if people.length === 0}<p class="muted">ありません</p>{/if}
@@ -51,6 +59,31 @@
 </section>
 
 <style>
+  .segmented {
+    display: flex;
+    margin: 6px 0 12px;
+    border: 1px solid var(--outline);
+    border-radius: 999px;
+    overflow: hidden;
+  }
+  .segmented button {
+    flex: 1;
+    font: inherit;
+    font-size: 0.9em;
+    padding: 7px 4px;
+    color: var(--text);
+    background: none;
+    border: none;
+    border-right: 1px solid var(--outline);
+    cursor: pointer;
+  }
+  .segmented button:last-child {
+    border-right: none;
+  }
+  .segmented button.active {
+    font-weight: 600;
+    background: var(--secondary-container);
+  }
   .mutes {
     padding: 12px 16px 24px;
   }

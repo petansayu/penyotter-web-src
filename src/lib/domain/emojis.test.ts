@@ -22,7 +22,7 @@ describe("カスタム絵文字の一覧", () => {
     expect(setReferences(list)).toEqual([{ author: SETTER, identifier: "cats" }]);
     expect(resolveCatalog(list, [old, latest])).toEqual([
       { shortcode: "pe", url: "https://e.example/pe.png" },
-      { shortcode: "neko", url: "https://e.example/neko.png" },
+      { shortcode: "neko", url: "https://e.example/neko.png", set: `30030:${SETTER}:cats` },
     ]);
   });
 

@@ -1,3 +1,4 @@
+import { colorOf, type ColorCode } from "./colors";
 import { nip19 } from "nostr-tools";
 import { isHex64, type Event } from "../nostr/events";
 
@@ -149,9 +150,10 @@ export type Segment =
   | { type: "link"; url: string }
   | { type: "emoji"; shortcode: string; url: string }
   | { type: "hashtag"; tag: string }
+  | ({ type: "color" } & ColorCode)
   | { type: "profile"; pubkey: string; relays: string[]; raw: string }
   | { type: "event"; id: string; relays: string[]; author?: string; raw: string }
-  | { type: "address"; kind: number; pubkey: string; identifier: string; raw: string };
+  | { type: "address"; kind: number; pubkey: string; identifier: string; relays: string[]; raw: string };
 
 /** NIP-30 のカスタム絵文字（shortcode → https の URL）。 */
 export function emojisOf(event: Event): Map<string, string> {
@@ -165,12 +167,12 @@ export function emojisOf(event: Event): Map<string, string> {
 }
 
 const TOKEN = new RegExp(
-  `(https?:\\/\\/[^\\s<>]+)|((?:nostr:)?(?:npub|nprofile|note|nevent|naddr)1${BECH32})|:([A-Za-z0-9_-]{1,64}):|(?<=^|[\\s　])#([^\\s#　、。,.!?！？「」()（）]+)`,
+  `(https?:\\/\\/[^\\s<>]+)|((?:nostr:)?(?:npub|nprofile|note|nevent|naddr)1${BECH32})|:([A-Za-z0-9_-]{1,64}):|(?<![0-9A-Za-z_&#/])#([0-9a-fA-F]{3,8})(?![0-9A-Za-z_])|(?<=^|[\\s　])#([^\\s#　、。,.!?！？「」()（）]+)`,
   "giu",
 );
 
-/** 本文を、文字・リンク・カスタム絵文字・ハッシュタグ・nostr: の参照に分ける。 */
-export function segments(text: string, emojis: Map<string, string>): Segment[] {
+/** 本文を、文字・リンク・カスタム絵文字・カラーコード・ハッシュタグ・nostr: の参照に分ける。tags は投稿のタグ（短いカラーコードとハッシュタグの見分けに使う）。 */
+export function segments(text: string, emojis: Map<string, string>, tags: string[][] = []): Segment[] {
   const result: Segment[] = [];
   let last = 0;
   const pushText = (value: string) => {
@@ -193,7 +195,16 @@ export function segments(text: string, emojis: Map<string, string>): Segment[] {
       const url = emojis.get(match[3]);
       if (url) segment = { type: "emoji", shortcode: match[3], url };
     } else if (match[4]) {
-      segment = { type: "hashtag", tag: match[4] };
+      // 色でなければ、ふつうのハッシュタグ（前が空白か行頭のときだけ。ハッシュタグの決まりと同じ）
+      const color = colorOf(match[4], tags);
+      if (color) segment = { type: "color", ...color };
+      else if (index === 0 || /[\s　]/.test(text[index - 1])) {
+        const tag = text.slice(index + 1).match(/^[^\s#　、。,.!?！？「」()（）]+/)![0];
+        segment = { type: "hashtag", tag };
+        consumed = `#${tag}`;
+      }
+    } else if (match[5]) {
+      segment = { type: "hashtag", tag: match[5] };
     }
     if (!segment) continue;
     pushText(text.slice(last, index));
@@ -218,7 +229,7 @@ function reference(raw: string): Segment | null {
       case "nevent":
         return { type: "event", id: decoded.data.id, relays: decoded.data.relays ?? [], author: decoded.data.author, raw };
       case "naddr":
-        return { type: "address", kind: decoded.data.kind, pubkey: decoded.data.pubkey, identifier: decoded.data.identifier, raw };
+        return { type: "address", kind: decoded.data.kind, pubkey: decoded.data.pubkey, identifier: decoded.data.identifier, relays: decoded.data.relays ?? [], raw };
     }
   } catch {
     // 読めない参照はただの文字

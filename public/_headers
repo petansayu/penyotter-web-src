@@ -1,10 +1,14 @@
 # Cloudflare Pages の応答ヘッダー（ビルドで dist/_headers になる）。書き方は https://developers.cloudflare.com/pages/configuration/headers/
 
+# Strict-Transport-Security: いつも https で開かせる（.dev はもともとブラウザが https に限っているが、ほかの名前で配るときのため）。pages.dev はほかの人も使うので includeSubDomains は付けない
+# Cross-Origin-Opener-Policy: ほかのサイトの窓から、この画面の window を触らせない（開いたリンクにも opener を渡していない）
 /*
   Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; media-src 'self' https: blob:; connect-src 'self' https: wss:; font-src 'self'; manifest-src 'self'; worker-src 'self'; frame-src https://www.youtube-nocookie.com https://platform.twitter.com https://open.spotify.com https://w.soundcloud.com https://embed.nicovideo.jp https://player.vimeo.com https://www.tiktok.com https://www.instagram.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
   X-Content-Type-Options: nosniff
   Referrer-Policy: no-referrer
   Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=()
+  Strict-Transport-Security: max-age=31536000
+  Cross-Origin-Opener-Policy: same-origin
 
 # 画面の入口と Service Worker は毎回確かめる（新しい版にすぐ気づけるように）
 /

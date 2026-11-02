@@ -21,7 +21,8 @@
   let reload = $state(0);
 
   const SOURCES: Record<HistorySource, string> = { relay: "リレーから取った", local: "このブラウザにあった", app: "このアプリで変えた", "before-restore": "復元の直前" };
-  const current = $derived(kind === 10002 ? viewer.relayListEvent : kind === 10030 ? emojis.listEvent : viewer.listOf(kind));
+  // プロフィールのバッジ（10008）は手元に持っていないので、今の版との比べはしない
+  const current = $derived(kind === 10002 ? viewer.relayListEvent : kind === 10030 ? emojis.listEvent : kind === 10008 ? undefined : viewer.listOf(kind));
 
   $effect(() => {
     void reload;

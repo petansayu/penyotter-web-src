@@ -1,4 +1,6 @@
 import { nip19 } from "nostr-tools";
+import type { AroundScope } from "./domain/around";
+import { isHex64 } from "./nostr/events";
 
 /**
  * 画面の切り替え。URL の # の後ろに置く（静的なサイトのどこに置いても動くように）。
@@ -10,6 +12,11 @@ export type Route =
   | { name: "home" }
   | { name: "settings"; page: SettingsPage | null }
   | { name: "mutes" }
+  | { name: "badges" }
+  | { name: "conversation"; a: string; b: string }
+  | { name: "topic"; word: string; since: number; until: number; tab: "following" | "global" }
+  | { name: "flow"; id: string; author?: string; scope: "following" | "global" }
+  | { name: "around"; id?: string; at?: number; scope: AroundScope; author?: string }
   | { name: "history" }
   | { name: "bookmarks" }
   | { name: "lists"; identifier: string | null }
@@ -48,6 +55,57 @@ export function parseRoute(hash: string): Route {
   const page = path.match(/^\/settings\/([a-z]+)$/)?.[1] as SettingsPage | undefined;
   if (page && SETTINGS_PAGES.includes(page)) return { name: "settings", page };
   if (path === "/mutes") return { name: "mutes" };
+  if (path === "/badges") return { name: "badges" };
+  // 2 人の会話（#/talk/<npub>/<npub>）
+  const talk = path.match(/^\/talk\/(npub1[0-9a-z]+)\/(npub1[0-9a-z]+)$/);
+  if (talk) {
+    try {
+      const [a, b] = [nip19.decode(talk[1]), nip19.decode(talk[2])];
+      if (a.type === "npub" && b.type === "npub") return { name: "conversation", a: a.data, b: b.data };
+    } catch {
+      // 下で見つからない画面にする
+    }
+  }
+  // いまの話題の言葉の投稿（#/topic/<言葉>?since=&until=&tab=）
+  const topicWord = path.match(/^\/topic\/(.+)$/)?.[1];
+  if (topicWord) {
+    const query = new URLSearchParams(queryString);
+    const [since, until] = [Number(query.get("since")), Number(query.get("until"))];
+    if (Number.isFinite(since) && Number.isFinite(until)) return { name: "topic", word: topicWord, since, until, tab: query.get("tab") === "global" ? "global" : "following" };
+  }
+  // たぶんこの流れ（#/flow/<nevent>?scope=following|global）
+  const flowValue = path.match(/^\/flow\/(.+)$/)?.[1];
+  if (flowValue) {
+    try {
+      const decoded = nip19.decode(flowValue.toLowerCase());
+      const scope = new URLSearchParams(queryString).get("scope") === "global" ? "global" : "following";
+      if (decoded.type === "nevent") return { name: "flow", id: decoded.data.id, author: decoded.data.author, scope };
+    } catch {
+      // 下で見つからない画面にする
+    }
+  }
+  // 日時を指定して見る（#/at/<UNIX 秒>?scope=…&author=<16 進>）
+  const atValue = path.match(/^\/at\/(\d{1,12})$/)?.[1];
+  if (atValue) {
+    const query = new URLSearchParams(queryString);
+    const raw = query.get("scope");
+    const scope: AroundScope = raw === "global" || raw === "author" ? raw : "following";
+    const author = query.get("author") ?? undefined;
+    return { name: "around", at: Number(atValue), scope, ...(author && isHex64(author) ? { author } : {}) };
+  }
+  // 前後の投稿（#/around/<note|nevent>?scope=following|global|author）
+  const aroundValue = path.match(/^\/around\/(.+)$/)?.[1];
+  if (aroundValue) {
+    try {
+      const decoded = nip19.decode(aroundValue.toLowerCase());
+      const raw = new URLSearchParams(queryString).get("scope");
+      const scope: AroundScope = raw === "global" || raw === "author" ? raw : "following";
+      if (decoded.type === "note") return { name: "around", id: decoded.data, scope };
+      if (decoded.type === "nevent") return { name: "around", id: decoded.data.id, scope, author: decoded.data.author };
+    } catch {
+      // 下で見つからない画面にする
+    }
+  }
   if (path === "/history") return { name: "history" };
   if (path === "/bookmarks") return { name: "bookmarks" };
   if (path === "/lists") return { name: "lists", identifier: null };
@@ -112,6 +170,25 @@ export const searchHref = (q: string) => `#/search${q ? `?${new URLSearchParams(
 
 export const threadHref = (id: string, author?: string, relays: string[] = []) =>
   `#/e/${nip19.neventEncode({ id, author, relays: relays.slice(0, 3) })}`;
+
+/** 2 人の会話の画面。 */
+export const talkHref = (a: string, b: string) => `#/talk/${nip19.npubEncode(a)}/${nip19.npubEncode(b)}`;
+
+/** 日時を指定して見る画面（author は「この人だけ」のとき）。 */
+export const atHref = (time: number, scope: AroundScope, author?: string) =>
+  `#/at/${Math.floor(time)}?scope=${scope}${author ? `&author=${author}` : ""}`;
+
+/** いまの話題の言葉を含む投稿の画面。 */
+export const topicHref = (word: string, since: number, until: number, tab: "following" | "global") =>
+  `#/topic/${encodeURIComponent(word)}?since=${Math.floor(since)}&until=${Math.floor(until)}&tab=${tab}`;
+
+/** たぶんこの流れの画面。scope はホームの範囲。 */
+export const flowHref = (id: string, author: string, scope: "following" | "global") =>
+  `#/flow/${nip19.neventEncode({ id, author })}?scope=${scope}`;
+
+/** 前後の投稿の画面。scope は最初に選ぶ範囲。 */
+export const aroundHref = (id: string, scope: AroundScope, author?: string) =>
+  `#/around/${nip19.neventEncode({ id, author })}?scope=${scope}`;
 
 class Router {
   route = $state<Route>(parseRoute(location.hash));

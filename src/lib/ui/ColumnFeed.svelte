@@ -2,6 +2,7 @@
   import { parseListAddress, parseRelayParam, type DeckColumn } from "../domain/deck";
   import { Feed, HOME_KINDS, PROFILE_KINDS, type Card } from "../store/feed.svelte";
   import { listSource, profileSource, reactionsSource, relaysSource } from "../store/sources";
+  import { untrack } from "svelte";
   import { viewer } from "../store/viewer.svelte";
   import Timeline from "./Timeline.svelte";
 
@@ -33,11 +34,12 @@
     }
   }
 
-  // 見る人のリレーのリストを読んでから読み始める（リレーの列は決めたリレーだけなので、すぐでよい）
+  // 見る人のリレーのリストを読んでから読み始める（リレーの列は決めたリレーだけなので、すぐでよい）。start が読む
+  // loading などを依存にすると、読み終わるたびに読み直して購読が増え続ける（リレーの同時の REQ の枠を埋めていた）ので untrack
   const canStart = $derived(column.type === "relays" || viewer.ready);
   $effect(() => {
     if (!feed || !canStart) return;
-    void feed.start();
+    untrack(() => void feed.start());
     return () => feed.stop();
   });
 

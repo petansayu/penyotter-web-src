@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { buildZapRequest, checkZapInfo, lnurlOf, lnurlpEndpoint, parseLightningAddress } from "../domain/zaps";
+  import { buildZapRequest, checkInvoice, checkZapInfo, lnurlOf, lnurlpEndpoint, parseLightningAddress } from "../domain/zaps";
   import type { Event } from "../nostr/events";
   import { profiles } from "../store/cache.svelte";
   import { viewer } from "../store/viewer.svelte";
@@ -55,9 +55,7 @@
       url.searchParams.set("nostr", JSON.stringify(zap));
       url.searchParams.set("lnurl", lnurl);
       const response = await getJson(url.toString());
-      const pr = typeof response.pr === "string" && /^ln/i.test(response.pr) ? response.pr : null;
-      if (!pr) throw new Error(typeof response.reason === "string" ? response.reason.slice(0, 200) : "請求書を取得できませんでした");
-      invoice = pr;
+      invoice = checkInvoice(response, millisats);
       message = "ウォレットで支払ってください。";
     } catch (e) {
       message = e instanceof Error && e.message ? e.message : "請求書を取得できませんでした";

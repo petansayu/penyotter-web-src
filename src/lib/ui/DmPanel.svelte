@@ -2,7 +2,11 @@
   import { tick, untrack } from "svelte";
   import { nip19 } from "nostr-tools";
   import { profileHref } from "../router.svelte";
-  import { displayName } from "../store/cache.svelte";
+  import { displayName, keepProfiles, profiles } from "../store/cache.svelte";
+  import { mentionCandidates } from "../domain/mentions";
+  import { isHex64 } from "../nostr/events";
+  import { eventsOf, pool } from "../nostr/pool";
+  import { searchRelays } from "../store/search.svelte";
   import { dms } from "../store/dm.svelte";
   import { summary } from "../store/publishSummary";
   import { settings } from "../store/settings.svelte";
@@ -46,9 +50,38 @@
     void tick().then(() => bottom?.scrollIntoView({ block: "end" }));
   });
 
+  /**
+   * 新しい会話の相手を、名前・npub・公開鍵で探す（Android 版の「名前、npub、公開鍵で検索」）。候補はこのブラウザの
+   * プロフィール・フォロー中の人・ペットネームから。3 人未満で 2 文字以上なら検索リレー（NIP-50）にも問い合わせる。
+   */
+  const peerCandidates = $derived.by(() => {
+    const text = newPeer.trim().replace(/^@/, "");
+    if (!text || /^(npub1|nprofile1|nostr:)/i.test(text) || isHex64(text.toLowerCase())) return [];
+    const people = [...profiles].slice(-2000).map(([pubkey, { profile }]) => ({ pubkey, ...profile, petname: viewer.petnames.get(pubkey) }));
+    return mentionCandidates(text, people, new Set(viewer.follows)).filter((p) => p.pubkey !== viewer.pubkey);
+  });
+  let peerTimer: ReturnType<typeof setTimeout> | undefined;
+  $effect(() => {
+    const text = newPeer.trim().replace(/^@/, "");
+    const few = peerCandidates.length < 3;
+    clearTimeout(peerTimer);
+    if (!few || text.length < 2 || /^(npub1|nprofile1)/i.test(text)) return;
+    peerTimer = setTimeout(() => {
+      const relays = searchRelays(viewer.pubkey);
+      if (relays.length > 0) void pool.fetch(relays, [{ kinds: [0], search: text, limit: 20 }]).then((fetched) => keepProfiles(eventsOf(fetched)));
+    }, 400);
+  });
+
+  function openPeer(pubkey: string) {
+    newPeer = "";
+    navigate(`#/messages/${nip19.npubEncode(pubkey)}`);
+  }
+
   function openNew() {
     newError = null;
     const raw = newPeer.trim().replace(/^nostr:/i, "");
+    if (isHex64(raw.toLowerCase())) return openPeer(raw.toLowerCase());
+    if (peerCandidates.length > 0 && !/^(npub1|nprofile1)/i.test(raw)) return openPeer(peerCandidates[0].pubkey);
     try {
       const decoded = nip19.decode(raw.toLowerCase());
       const pubkey = decoded.type === "npub" ? decoded.data : decoded.type === "nprofile" ? decoded.data.pubkey : null;
@@ -56,7 +89,7 @@
       newPeer = "";
       navigate(`#/messages/${nip19.npubEncode(pubkey)}`);
     } catch {
-      newError = "npub を入れてください";
+      newError = "名前・npub・公開鍵で相手を探してください";
     }
   }
 
@@ -102,9 +135,16 @@
       <p class="banner">DM 受信リレー（kind 10050）を公開していません。公開すると、NIP-17 の DM を受け取れます。<a href="#/settings/relays">設定「リレー」で公開する</a></p>
     {/if}
     <div class="new">
-      <input bind:value={newPeer} placeholder="npub を入れて、新しい会話" aria-label="会話の相手の npub" spellcheck="false" onkeydown={(event) => event.key === "Enter" && openNew()} />
+      <input bind:value={newPeer} placeholder="名前、npub、公開鍵で相手を探す" aria-label="新しい会話の相手（名前、npub、公開鍵）" spellcheck="false" onkeydown={(event) => event.key === "Enter" && openNew()} />
       <button type="button" class="outline" onclick={openNew}>開く</button>
     </div>
+    {#if peerCandidates.length > 0}
+      <ul class="peer-candidates" aria-label="相手の候補">
+        {#each peerCandidates as person (person.pubkey)}
+          <li><button type="button" onclick={() => openPeer(person.pubkey)}><Avatar pubkey={person.pubkey} size={28} /><span>{person.petname ? `📛${person.petname}` : displayName(person.pubkey)}</span>{#if viewer.follows.includes(person.pubkey)}<small>フォロー中</small>{/if}</button></li>
+        {/each}
+      </ul>
+    {/if}
     {#if newError}<p class="error">{newError}</p>{/if}
     {#if dms.error}<p class="error">{dms.error}</p>{/if}
     {#if dms.loading && dms.conversations.length === 0}<p class="muted">読み込んでいます（署名役に復号を頼んでいます）…</p>{/if}
@@ -165,6 +205,37 @@
 {/if}
 
 <style>
+  .peer-candidates {
+    margin: 4px 0 8px;
+    padding: 0;
+    list-style: none;
+    border: 1px solid var(--outline-variant);
+    border-radius: 10px;
+  }
+  .peer-candidates button {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 6px 10px;
+    font: inherit;
+    text-align: left;
+    color: var(--text);
+    background: none;
+    border: none;
+    cursor: pointer;
+  }
+  .peer-candidates span {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .peer-candidates small {
+    color: var(--muted);
+    font-size: 0.75em;
+  }
   .warn {
     color: #c33;
   }

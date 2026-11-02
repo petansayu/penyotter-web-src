@@ -2,10 +2,11 @@ import { reactionHidden } from "./hiddenMessages";
 import { isHex64, type Event } from "../nostr/events";
 import { emojisOf, quoteCardId } from "./content";
 import { parent } from "./threads";
+import { AWARD, awardedAddresses } from "./badges";
 
 /** 通知（Android 版の Notifications・Zaps・NotificationsPanel、技術資料 5.3）。 */
 
-export type NotificationType = "all" | "replies" | "reactions" | "reposts" | "zaps" | "quotes";
+export type NotificationType = "all" | "replies" | "reactions" | "reposts" | "zaps" | "quotes" | "badges";
 export const NOTIFICATION_TYPES: { type: NotificationType; label: string }[] = [
   { type: "all", label: "すべて" },
   { type: "replies", label: "リプライ" },
@@ -13,9 +14,10 @@ export const NOTIFICATION_TYPES: { type: NotificationType; label: string }[] = [
   { type: "reposts", label: "リポスト" },
   { type: "zaps", label: "zap" },
   { type: "quotes", label: "引用" },
+  { type: "badges", label: "バッジ" },
 ];
 
-export const NOTIFICATION_KINDS = [1, 6, 7, 16, 1111, 9735];
+export const NOTIFICATION_KINDS = [1, 6, 7, 8, 16, 1111, 9735];
 /** 通知の対象として使わない種類（プロフィール・フォロー一覧・削除）。リアクション（7）は「あなたのリアクション」として使う。 */
 export const NOT_TARGETS = [0, 3, 5];
 
@@ -76,6 +78,7 @@ export const formatSats = (value: number | null) => (value === null ? "金額不
 
 export function notificationType(event: Event): NotificationType {
   if (event.kind === 9735) return "zaps";
+  if (event.kind === AWARD) return "badges";
   // 技術資料 5.3 のとおり、q タグか本文末尾の note・nevent があれば引用（Android 版のコードは q タグだけを見ている）
   if (event.kind === 1 && quoteCardId(event) !== null) return "quotes";
   if (event.kind === 1 || event.kind === 1111) return "replies";
@@ -118,6 +121,8 @@ export function eligible(event: Event, me: string): boolean {
     const receipt = zapReceipt(event);
     return !!receipt && receipt.sender !== me;
   }
+  // バッジの授与は、授与した人自身のバッジだけ（投稿を指さない）
+  if (event.kind === AWARD) return awardedAddresses(event, me).length > 0;
   return notificationTarget(event) !== null;
 }
 
@@ -126,7 +131,7 @@ export interface NotificationGroup {
   key: string;
   events: Event[];
   target: string | null;
-  kind: "reply" | "quote" | "action" | "actions";
+  kind: "reply" | "quote" | "action" | "actions" | "badge";
   time: number;
 }
 
@@ -156,7 +161,9 @@ export function notificationGroups(events: Iterable<Event>, me: string, options:
   for (const event of rows) {
     const type = notificationType(event);
     const target = notificationTarget(event);
-    if (type === "replies" || type === "quotes") {
+    if (type === "badges") {
+      result.push({ key: `badge:${event.id}`, events: [event], target: null, kind: "badge", time: event.created_at });
+    } else if (type === "replies" || type === "quotes") {
       result.push({ key: `${type === "quotes" ? "quote" : "reply"}:${event.id}`, events: [event], target, kind: type === "quotes" ? "quote" : "reply", time: event.created_at });
     } else if (options.separate?.has(event.id)) {
       result.push({ key: `action:${event.id}`, events: [event], target, kind: "action", time: event.created_at });
@@ -173,7 +180,7 @@ export function notificationGroups(events: Iterable<Event>, me: string, options:
 
 export type ActionLine =
   | { type: "zap"; event: Event; receipt: ZapReceipt }
-  | { type: "reaction"; content: string; emoji: string | null; actors: string[]; hidden: { actor: string; message: string }[] }
+  | { type: "reaction"; content: string; emoji: string | null; actors: string[]; hidden: { actor: string; message: string }[]; tags?: string[][] }
   | { type: "reposts"; actors: string[] };
 
 /** まとめたカードの行: zap（新しい順に 1 件ずつ）、リポスト、絵文字ごとのリアクション。 */
@@ -183,7 +190,8 @@ export function actionLines(group: NotificationGroup): ActionLine[] {
     return receipt ? [{ type: "zap" as const, event, receipt }] : [];
   });
   const reposts = [...new Set(group.events.filter((event) => notificationType(event) === "reposts").map((event) => event.pubkey))];
-  const reactions = new Map<string, { content: string; emoji: string | null; actors: string[]; hidden: { actor: string; message: string }[] }>();
+  // tags は画像の絵文字のとき、最初のリアクションのタグ（絵文字のパックを探すのに使う）
+  const reactions = new Map<string, { content: string; emoji: string | null; actors: string[]; hidden: { actor: string; message: string }[]; tags?: string[][] }>();
   for (const event of group.events.filter((e) => notificationType(e) === "reactions")) {
     // 隠しメッセージ（セクシー餃子）付きは、見える絵文字でまとめる（Android 版と同じ）
     const secret = reactionHidden(event.content.trim());
@@ -191,7 +199,7 @@ export function actionLines(group: NotificationGroup): ActionLine[] {
     const shortcode = /^:([A-Za-z0-9_-]+):$/.exec(content)?.[1];
     const emoji = shortcode ? emojisOf(event).get(shortcode) ?? null : null;
     const key = `${content}\u0000${emoji ?? ""}`;
-    const line = reactions.get(key) ?? { content, emoji, actors: [], hidden: [] };
+    const line = reactions.get(key) ?? { content, emoji, actors: [], hidden: [], ...(emoji ? { tags: event.tags } : {}) };
     if (!line.actors.includes(event.pubkey)) line.actors.push(event.pubkey);
     if (secret) line.hidden.push({ actor: event.pubkey, message: secret.message });
     reactions.set(key, line);

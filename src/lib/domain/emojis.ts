@@ -13,7 +13,24 @@ export const PALETTE: { text: string; label: string }[] = [
   ["🐱", "ねこ"], ["🐶", "いぬ"], ["🐰", "うさぎ"], ["🐾", "足あと"], ["📷", "カメラ"], ["🎵", "音符"],
 ].map(([text, label]) => ({ text, label }));
 
-export interface CustomEmoji { shortcode: string; url: string }
+/** set はその絵文字が入っている絵文字セットのアドレス（30030:公開鍵:識別子）。セットから来たものだけ。 */
+export interface CustomEmoji { shortcode: string; url: string; set?: string }
+
+/** 絵文字セットのアドレス（30030:公開鍵:識別子）を読む。読めなければ null。 */
+export function parseSetAddress(value: string | undefined): { author: string; identifier: string } | null {
+  const [kind, author, ...rest] = (value ?? "").trim().split(":");
+  const identifier = rest.join(":");
+  if (kind !== "30030" || !isHex64(author) || !identifier || identifier.length > 256) return null;
+  return { author, identifier };
+}
+
+/**
+ * 送るときの emoji タグ。セットから来た絵文字は、4 つめにそのセットのアドレスを付ける（NIP-30。見た人がパックを
+ * 探せるように。Android 版の CustomEmoji.tag）。
+ */
+export function emojiTag(emoji: CustomEmoji): string[] {
+  return ["emoji", emoji.shortcode, emoji.url, ...(parseSetAddress(emoji.set) ? [emoji.set!.trim()] : [])];
+}
 
 /** カスタム絵文字の上限（Android 版の CustomEmoji.MAX_CATALOG）。 */
 export const MAX_CATALOG = 3000;
@@ -41,9 +58,9 @@ export function setReferences(list: Event): { author: string; identifier: string
   const result: { author: string; identifier: string }[] = [];
   for (const tag of list.tags) {
     if (tag[0] !== "a" || tag.length < 2) continue;
-    const [kind, author, ...rest] = tag[1].split(":");
-    const identifier = rest.join(":");
-    if (kind !== "30030" || !isHex64(author) || !identifier || identifier.length > 256) continue;
+    const address = parseSetAddress(tag[1]);
+    if (!address) continue;
+    const { author, identifier } = address;
     if (!result.some((r) => r.author === author && r.identifier === identifier)) result.push({ author, identifier });
     if (result.length >= 300) break;
   }
@@ -60,7 +77,8 @@ export function resolveCatalog(list: Event, sets: Event[]): CustomEmoji[] {
     const key = `${set.pubkey}:${d}`;
     if (newer(set, latest.get(key))) latest.set(key, set);
   }
-  const all = [...emojiTags(list.tags), ...setReferences(list).flatMap((ref) => emojiTags(latest.get(`${ref.author}:${ref.identifier}`)?.tags ?? []))];
+  const all = [...emojiTags(list.tags), ...setReferences(list).flatMap((ref) =>
+    emojiTags(latest.get(`${ref.author}:${ref.identifier}`)?.tags ?? []).map((e) => ({ ...e, set: `30030:${ref.author}:${ref.identifier}` })))];
   const seen = new Set<string>();
   return all.filter((e) => {
     const key = `${e.shortcode}\u0000${e.url}`;

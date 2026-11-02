@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 // relayLists はブラウザの保存分を読むので、先に代わりを置く
 vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => {}, removeItem: () => {} });
-const { planAuthors, relayLists } = await import("./outbox");
+const { AUTHORS_PER_REQ, groupAuthors, planAuthors, relayLists } = await import("./outbox");
 
 describe("何人分かを読むときのリレーの選び方（4.4.3）", () => {
   const people = Array.from({ length: 13 }, (_, i) => i.toString(16).padStart(64, "0"));
@@ -23,5 +23,19 @@ describe("何人分かを読むときのリレーの選び方（4.4.3）", () =>
     // 枠に入っているリレーでも、その人が入っていなければ足す（1 回だけ）
     expect(plans.filter((p) => p.relay === "wss://popular.test" && p.authors.includes(me))).toHaveLength(1);
     expect(planAuthors([...people, me], [{ author: me, relays: ["wss://mine.test"] }, { author: me, relays: ["wss://mine.test"] }]).filter((p) => p.relay === "wss://mine.test")).toHaveLength(1);
+  });
+});
+
+describe("500 人より多くフォローしている人", () => {
+  const many = Array.from({ length: 1444 }, (_, i) => (i + 0x1000).toString(16).padStart(64, "0"));
+  for (const p of many) relayLists.set(p, { read: [], write: ["wss://big.test"] });
+
+  it("全員を問い合わせ、1 つの REQ は 500 人まで", () => {
+    const plans = planAuthors(many).filter((p) => p.relay === "wss://big.test");
+    expect(plans.flatMap((p) => p.authors)).toHaveLength(1444);
+    expect(plans.map((p) => p.authors.length)).toEqual([500, 500, 444]);
+    expect(groupAuthors(many).map((g) => g.length)).toEqual([AUTHORS_PER_REQ, AUTHORS_PER_REQ, 444]);
+    // 最後にフォローした人も入る（以前は先頭の 500 人だけだった）
+    expect(plans.some((p) => p.authors.includes(many[1443]))).toBe(true);
   });
 });
