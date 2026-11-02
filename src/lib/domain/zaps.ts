@@ -1,5 +1,6 @@
 import { nip19, type EventTemplate } from "nostr-tools";
 import { isHex64, type Event } from "../nostr/events";
+import { bolt11Msats } from "./notifications";
 
 /** zap のリクエスト（NIP-57、Android 版の ZapService・LightningAddress、技術資料 6.11）。 */
 
@@ -34,6 +35,17 @@ export function checkZapInfo(info: unknown, millisats: number): { callback: stri
   if (!(millisats >= min && millisats <= max)) throw new Error("Zap金額が送信可能範囲外です");
   if (typeof raw.callback !== "string" || !raw.callback.startsWith("https://")) throw new Error("請求書の取得先が正しくありません");
   return { callback: raw.callback };
+}
+
+/**
+ * LNURL のコールバックの応答から請求書を取り出す。金額が頼んだ額とちょうど同じときだけ使う（LUD-06。Android 版の
+ * Zaps.invoiceMatches）。金額のない請求書も使わない（サーバーに多く払わされないように）。
+ */
+export function checkInvoice(response: Record<string, unknown>, millisats: number): string {
+  const pr = typeof response.pr === "string" && /^ln/i.test(response.pr) ? response.pr : null;
+  if (!pr) throw new Error(typeof response.reason === "string" ? response.reason.slice(0, 200) : "請求書を取得できませんでした");
+  if (bolt11Msats(pr) !== millisats) throw new Error("請求書の金額が頼んだ額と違うため止めました");
+  return pr;
 }
 
 /** zap リクエスト（kind 9734）。リレーには送らず、LNURL のコールバックに渡す。 */

@@ -1,4 +1,8 @@
 <script lang="ts">
+  import { settings } from "../store/settings.svelte";
+  import PeusaMood from "./PeusaMood.svelte";
+  import { jumpDialog } from "../store/jump.svelte";
+  import { miniAppsDialog } from "../store/miniApps.svelte";
   import { tick } from "svelte";
   import { profileHref, router, SETTINGS_TITLES } from "../router.svelte";
   import { composer } from "../store/composer.svelte";
@@ -29,6 +33,11 @@
       case "search": return "検索";
       case "settings": return route.page ? SETTINGS_TITLES[route.page] : "設定";
       case "mutes": return "ミュート";
+      case "badges": return "バッジ";
+      case "around": return "前後の投稿";
+      case "conversation": return "2 人の会話";
+      case "topic": return "話題";
+      case "flow": return "たぶんこの流れ";
       case "history": return "一覧の履歴";
       case "bookmarks": return "ブックマーク";
       case "write": return "記事を書く";
@@ -287,10 +296,13 @@
       <a class="plain badged-link" href="#/messages" class:active={route.name === "messages"} title="DM" aria-label="DM"><Icon name="mail" />{#if dms.unreadCount > 0}<i class="badge-dot" aria-label="DM の未読があります"></i>{/if}</a>
     {/if}
     <a class="plain" href="#/bookmarks" class:active={route.name === "bookmarks"} title="ブックマーク" aria-label="ブックマーク"><Icon name="bookmarkBorder" /></a>
+    <button type="button" class="plain" onclick={() => (jumpDialog.open = true)} title="日時を指定して見る" aria-label="日時を指定して見る"><Icon name="history" /></button>
+    <button type="button" class="plain" onclick={() => (miniAppsDialog.open = true)} title="ミニアプリ" aria-label="ミニアプリ"><Icon name="apps" /></button>
     {#if viewer.pubkey}
       <a class="plain" href={profileHref(viewer.pubkey)} class:active={route.name === "profile" && route.pubkey === viewer.pubkey} title="自分のプロフィール" aria-label="自分のプロフィール"><Icon name="person" /></a>
     {/if}
     <a class="plain" href="#/settings" class:active={route.name === "settings"} title="設定" aria-label="設定"><Icon name="settings" /></a>
+    {#if settings.peusaMode}<PeusaMood />{/if}
     <button type="button" class="plain" class:active={helpOpen} onclick={() => (helpOpen = !helpOpen)} title="キーボードの操作（?）" aria-label="キーボードの操作"><Icon name="keyboard" /></button>
     {#if TEST_RELAY}<span class="test" title="テストモード">テスト</span>{/if}
     {#if !viewer.canSign}<span class="readonly" title="見るだけ">見る<br />だけ</span>{/if}

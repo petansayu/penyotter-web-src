@@ -39,14 +39,20 @@ self.addEventListener("fetch", (event) => {
     );
     return;
   }
-  // JavaScript・CSS・アイコンは保存分を使う（ファイル名に版ごとの印が付くので、古いものとは混ざらない）
+  // JavaScript・CSS・アイコンは保存分を使う（ファイル名に版ごとの印が付くので、古いものとは混ざらない）。
+  // ないファイルには、サイトが画面（index.html）を 200 で返す。公開の切り替えの途中にそれを JavaScript の名前で
+  // 保存してしまい、ふつうに開き直すと真っ白になったことがあるので、HTML は画面のほかには保存も使いもしない。
   event.respondWith(
-    caches.match(request).then((cached) => cached ?? fetch(request).then((response) => {
-      if (response.ok && response.type === "basic") {
+    caches.match(request).then((cached) => (cached && !isHtml(cached) ? cached : fetch(request).then((response) => {
+      if (response.ok && response.type === "basic" && !isHtml(response)) {
         const copy = response.clone();
         caches.open(CACHE).then((cache) => cache.put(request, copy));
       }
       return response;
-    })),
+    }))),
   );
 });
+
+function isHtml(response) {
+  return (response.headers.get("content-type") ?? "").includes("text/html");
+}

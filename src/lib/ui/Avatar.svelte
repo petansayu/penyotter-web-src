@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { peusaAvatars, peusaFace, peusaFaceOf } from "../store/peusa.svelte";
+  import { viewer } from "../store/viewer.svelte";
   import { chooseAvatar } from "../avatar/picker";
   import { profiles } from "../store/cache.svelte";
   import { settings } from "../store/settings.svelte";
@@ -14,10 +16,16 @@
   let failed = $state<string | null>(null);
   const showPicture = $derived(!!picture && failed !== picture && (settings.avatarPictures || alwaysPicture));
   const choice = $derived(chooseAvatar(pubkey));
+  // スーパーぺぇうさモード（中・強）の間は、このブラウザの画面だけ、自分のアイコンを季節のぺぇうさに、ほかの人の
+  // アイコンをぺぇうさのどれか（公開鍵で決める）にする
+  const peusaFaceUrl = $derived(peusaAvatars() ? (pubkey === viewer.pubkey ? peusaFace(new Date().getMonth() + 1) : peusaFaceOf(pubkey)) : null);
 </script>
 
-<span class="avatar" style:width="{size}px" style:height="{size}px">
-  {#if showPicture}
+<!-- data-profile-hover: マウスをのせるとプロフィールのホバーカード（HoverProfileCard） -->
+<span class="avatar" data-profile-hover={pubkey} style:width="{size}px" style:height="{size}px">
+  {#if peusaFaceUrl}
+    <img src={peusaFaceUrl} alt="" data-testid={pubkey === viewer.pubkey ? "avatar-peusa" : "avatar-peusa-other"} />
+  {:else if showPicture}
     <img src={picture} alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror={() => (failed = picture ?? null)} />
   {:else if choice}
     <GeneratedAvatar {choice} />

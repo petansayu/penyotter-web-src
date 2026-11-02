@@ -137,21 +137,36 @@ export interface AuthorPlan { relay: string; authors: string[] }
 export interface PinnedAuthor { author: string; relays: string[] }
 
 /**
- * 何人分かを、リレーごとにまとめる（技術資料 4.4.3）。相手は 500 人まで、相手の多いリレーから 12 件、
- * 1 つの REQ の authors は 100 人まで。pinned の人は、そのリレーが 12 件に入らなくても問い合わせる
+ * 1 つの REQ に入れる相手の数。REQ の中は 100 人ずつのフィルタに分ける（`chunkAuthors`）。リレーは同時に開ける
+ * REQ の数（10 前後）や 1 つの REQ のフィルタの数（10 前後）を限っているので、人数が多くても REQ を増やしすぎない
+ * ように、100 人のフィルタを 5 つまとめる（2026-10-23 に日本のリレーで確かめた）。
+ */
+export const AUTHORS_PER_REQ = 500;
+
+/** 何人分かを AUTHORS_PER_REQ 人ずつに分ける。 */
+export function groupAuthors(authors: string[]): string[][] {
+  const groups: string[][] = [];
+  for (let i = 0; i < authors.length; i += AUTHORS_PER_REQ) groups.push(authors.slice(i, i + AUTHORS_PER_REQ));
+  return groups;
+}
+
+/**
+ * 何人分かを、リレーごとにまとめる（技術資料 4.4.3）。相手の数は限らない（以前は 500 人までで、それより多く
+ * フォローしている人のホームで、あとからフォローした人の投稿が出なかった）。相手の多いリレーから 12 件、
+ * 1 つの REQ の authors は AUTHORS_PER_REQ 人まで。pinned の人は、そのリレーが 12 件に入らなくても問い合わせる
  * （自分の書き込みリレーがフォロー中の人とあまり重ならないと、自分の投稿がホームに出なかったため）。
  */
 export function planAuthors(pubkeys: string[], pinned: PinnedAuthor[] = []): AuthorPlan[] {
   const byRelay = new Map<string, string[]>();
-  for (const pubkey of pubkeys.slice(0, 500)) {
-    for (const url of writeRelays(pubkey)) byRelay.set(url, [...(byRelay.get(url) ?? []), pubkey]);
+  for (const pubkey of new Set(pubkeys)) {
+    for (const url of writeRelays(pubkey)) {
+      const authors = byRelay.get(url);
+      if (authors) authors.push(pubkey);
+      else byRelay.set(url, [pubkey]);
+    }
   }
   const chosen = [...byRelay].sort((a, b) => b[1].length - a[1].length).slice(0, 12);
-  const plans = chosen.flatMap(([relay, authors]) => {
-    const plans: AuthorPlan[] = [];
-    for (let i = 0; i < authors.length; i += 100) plans.push({ relay, authors: authors.slice(i, i + 100) });
-    return plans;
-  });
+  const plans = chosen.flatMap(([relay, authors]) => groupAuthors(authors).map((group) => ({ relay, authors: group })));
   for (const { author, relays } of pinned) {
     for (const relay of relays) {
       if (!plans.some((plan) => plan.relay === relay && plan.authors.includes(author))) plans.push({ relay, authors: [author] });
@@ -175,8 +190,8 @@ export async function fetchFromAuthors(pubkeys: string[], base: Filter, alwaysOn
   onEvent?: (event: Event) => void, perRelayLimit = 4000, pinned: PinnedAuthor[] = []): Promise<Fetched> {
   await loadRelayLists(pubkeys, alwaysOn);
   const plans = planAuthors(pubkeys, pinned);
-  const outbox = runLimited(plans, 8, (plan) => pool.fetch([plan.relay], [{ ...base, authors: plan.authors }], { limit: perRelayLimit, onEvent }));
-  const everyone = delay(700).then(() => pool.fetch(alwaysOn, chunkAuthors(base, pubkeys.slice(0, 500)), { onEvent }));
+  const outbox = runLimited(plans, 8, (plan) => pool.fetch([plan.relay], chunkAuthors(base, plan.authors), { limit: perRelayLimit, onEvent }));
+  const everyone = delay(700).then(async () => merge(await Promise.all(groupAuthors([...new Set(pubkeys)]).map((group) => pool.fetch(alwaysOn, chunkAuthors(base, group), { onEvent })))));
   const [outboxResults, everyoneResult] = await Promise.all([outbox, everyone]);
   // 完了かどうかは常時接続リレーの分で決める（アウトボックスの分は打ち切りが短く、届かないリレーも多い）
   return { ...merge([...outboxResults, everyoneResult]), complete: everyoneResult.complete };
@@ -184,8 +199,8 @@ export async function fetchFromAuthors(pubkeys: string[], base: Filter, alwaysOn
 
 /** 何人分かを購読する（4.4.3 と同じ分け方。打ち切りはない）。 */
 export function subscribeAuthors(pubkeys: string[], base: Filter, alwaysOn: string[], onEvent: (event: Event) => void, pinned: PinnedAuthor[] = []): () => void {
-  const closers = planAuthors(pubkeys, pinned).map((plan) => pool.subscribe([plan.relay], [{ ...base, authors: plan.authors }], onEvent));
-  closers.push(pool.subscribe(alwaysOn, chunkAuthors(base, pubkeys.slice(0, 500)), onEvent));
+  const closers = planAuthors(pubkeys, pinned).map((plan) => pool.subscribe([plan.relay], chunkAuthors(base, plan.authors), onEvent));
+  for (const group of groupAuthors([...new Set(pubkeys)])) closers.push(pool.subscribe(alwaysOn, chunkAuthors(base, group), onEvent));
   return () => closers.forEach((close) => close());
 }
 

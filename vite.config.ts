@@ -1,3 +1,4 @@
+import { execSync } from 'node:child_process'
 import { svelte } from '@sveltejs/vite-plugin-svelte'
 import { existsSync, readFileSync } from 'node:fs'
 import { defineConfig, type Plugin } from 'vite'
@@ -73,14 +74,28 @@ function trimEmojiData(): Plugin {
   }
 }
 
-const version = (JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')) as { version: string }).version
+/**
+ * 画面に出す版。main へのマージのたびにそのまま公開するので、番号は付けず、ビルドした日（日本時間）とコミットにする
+ * （例: 2026-10-25（8d552ad））。コミットは Cloudflare Pages の CF_PAGES_COMMIT_SHA、なければ手元の git。
+ */
+function buildVersion() {
+  const date = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' })
+  let commit = process.env.CF_PAGES_COMMIT_SHA ?? ''
+  if (!commit) {
+    try {
+      commit = execSync('git rev-parse HEAD', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
+    } catch {
+      // git がない場所でのビルドは日付だけ
+    }
+  }
+  return /^[0-9a-f]{7,40}$/.test(commit) ? `${date}（${commit.slice(0, 7)}）` : date
+}
 
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [svelte(), trimEmojiData(), pwaServiceWorker(), licenses()],
   define: {
-    __APP_VERSION__: JSON.stringify(version),
-    __BUILD_DATE__: JSON.stringify(new Date().toISOString().slice(0, 10)),
+    __APP_VERSION__: JSON.stringify(buildVersion()),
   },
   // 静的なサイトのどこ（GitHub Pages のサブパスなど）に置いても動くように、相対パスで書き出す
   base: './',

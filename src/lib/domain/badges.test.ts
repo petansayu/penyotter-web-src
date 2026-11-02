@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Event } from "../nostr/events";
-import { badgePairs, profileBadgeList, resolveBadges } from "./badges";
+import { badgeHolders, badgePairs, createdBadges, profileBadgeList, profileBadgeTags, receivedBadges, resolveBadges } from "./badges";
+import { eligible, notificationGroups, notificationType } from "./notifications";
 
 const OWNER = "a".repeat(64);
 const ISSUER = "b".repeat(64);
@@ -25,5 +26,40 @@ describe("バッジ（NIP-58）", () => {
     expect(resolveBadges(OWNER, [[ADDRESS, AWARD_ID]], [{ ...award, pubkey: OTHER }], [definition])).toEqual([]);
     expect(resolveBadges(OWNER, [[ADDRESS, AWARD_ID]], [{ ...award, tags: [["a", ADDRESS], ["p", OTHER]] }], [definition])).toEqual([]);
     expect(resolveBadges(OWNER, [[ADDRESS, AWARD_ID]], [award], [])).toEqual([]);
+  });
+
+  it("もらったバッジは授与した人自身のものだけで、同じバッジは新しい授与 1 つ", () => {
+    const first = event({ kind: 8, pubkey: ISSUER, created_at: 10, tags: [["a", ADDRESS], ["p", OWNER]] });
+    const later = event({ kind: 8, pubkey: ISSUER, created_at: 20, tags: [["a", ADDRESS], ["p", OWNER]] });
+    const forged = event({ kind: 8, pubkey: OTHER, created_at: 30, tags: [["a", ADDRESS], ["p", OWNER]] });
+    const received = receivedBadges(OWNER, [first, later, forged], [definition]);
+    expect(received.map((r) => [r.badge.address, r.awardId])).toEqual([[ADDRESS, later.id]]);
+    expect(receivedBadges(OTHER, [first], [definition])).toEqual([]);
+  });
+
+  it("バッジの授与は通知の「バッジ」で 1 件ずつ", () => {
+    const award = event({ kind: 8, pubkey: ISSUER, tags: [["a", ADDRESS], ["p", OWNER]] });
+    expect(eligible(award, OWNER)).toBe(true);
+    expect(notificationType(award)).toBe("badges");
+    expect(eligible({ ...award, pubkey: OTHER }, OWNER)).toBe(false);
+    expect(notificationGroups([award], OWNER, { type: "all" }).map((g) => g.kind)).toEqual(["badge"]);
+  });
+
+  it("飾る一覧は選んだ順に作り直し、30008 の d は外してほかのタグは残す", () => {
+    const second = `30009:${ISSUER}:second`;
+    const legacy = event({ kind: 30008, tags: [["d", "profile_badges"], ["a", ADDRESS], ["e", AWARD_ID], ["x", "kept"]] });
+    expect(profileBadgeTags(legacy, [[second, "6".repeat(64)], [ADDRESS, AWARD_ID]])).toEqual([["x", "kept"], ["a", second], ["e", "6".repeat(64)], ["a", ADDRESS], ["e", AWARD_ID]]);
+    expect(profileBadgeTags(undefined, [])).toEqual([]);
+  });
+
+  it("もらった人は作った人自身の授与の p だけ。作ったバッジは新しい版を新しい順", () => {
+    const award = event({ kind: 8, pubkey: ISSUER, created_at: 10, tags: [["a", ADDRESS], ["p", OWNER]] });
+    const later = event({ kind: 8, pubkey: ISSUER, created_at: 20, tags: [["a", ADDRESS], ["p", "d".repeat(64)], ["p", OWNER]] });
+    const forged = event({ kind: 8, pubkey: OTHER, created_at: 30, tags: [["a", ADDRESS], ["p", "e".repeat(64)]] });
+    expect(badgeHolders(ADDRESS, [award, later, forged])).toEqual(["d".repeat(64), OWNER]);
+    const older = event({ kind: 30009, pubkey: ISSUER, created_at: 50, tags: [["d", "early"], ["name", "古い名前"]] });
+    const newer = event({ kind: 30009, pubkey: ISSUER, created_at: 300, tags: [["d", "late"], ["name", "あとから"]] });
+    expect(createdBadges(ISSUER, [older, definition, newer]).map((b) => b.name)).toEqual(["あとから", "はやおき"]);
+    expect(createdBadges(OWNER, [definition])).toEqual([]);
   });
 });

@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { settings } from "../store/settings.svelte";
+  import PeusaEmpty from "./PeusaEmpty.svelte";
   import { useNavigate } from "./navigation";
   import { untrack } from "svelte";
   import { nip05 } from "nostr-tools";
@@ -7,12 +9,13 @@
   import { eventsOf } from "../nostr/pool";
   import { profileHref, searchHref, threadHref } from "../router.svelte";
   import { displayName, keepNotes, profiles } from "../store/cache.svelte";
-  import { Search, searchRelays } from "../store/search.svelte";
+  import { clearSearchHistory, rememberSearch, Search, searchHistory, searchRelays } from "../store/search.svelte";
   import { viewer } from "../store/viewer.svelte";
   import Avatar from "./Avatar.svelte";
   import Icon from "./Icon.svelte";
   import NoteCard from "./NoteCard.svelte";
   import SearchFiltersForm from "./SearchFiltersForm.svelte";
+  import { emojiPacks } from "../store/emojiPacks.svelte";
 
   /** 検索の画面。npub・note・NIP-05 などの識別子は、その画面へ移る。文字と #タグは結果を出す。 */
   /** onsearch があれば、検索語が変わったとき URL を変えずにそれを呼ぶ（カラム表示の検索の列）。 */
@@ -22,7 +25,10 @@
   let input = $state("");
   let error = $state<string | null>(null);
   let busy = $state(false);
-  let tab = $state<"posts" | "people">("posts");
+  /** タブ（Android 版の SearchTab: すべて・ユーザー・投稿・記事・タグ）。 */
+  type Tab = "all" | "people" | "posts" | "articles" | "tags";
+  let tab = $state<Tab>("all");
+  let history = $state<string[]>(searchHistory(viewer.pubkey));
   let search = $state<Search>();
   /** 同じ検索語で「検索」を押したときに探し直すための数。 */
   let runs = $state(0);
@@ -45,10 +51,11 @@
         if (activeFilters(applied) === 0) return;
         const current = new Search({ type: "filtered" }, applied);
         search = current;
-        tab = "posts";
+        tab = "all";
         void current.start();
         return;
       }
+      history = rememberSearch(viewer.pubkey, value);
       let query: SearchQuery;
       try {
         query = parseQuery(value);
@@ -59,7 +66,7 @@
       if (query.type !== "text" && query.type !== "tag") return void open(query);
       const current = new Search(query, applied);
       search = current;
-      tab = "posts";
+      tab = "all";
       void current.start();
     });
   });
@@ -82,6 +89,11 @@
           return;
         }
         case "address": {
+          // 絵文字パックは、パックの画面で開く（足せるように）
+          if (query.kind === 30030) {
+            emojiPacks.openAt(query.pubkey, query.identifier, query.relays);
+            return;
+          }
           const fetched = await fetchFromAuthor(query.pubkey, [{ kinds: [query.kind], authors: [query.pubkey], "#d": [query.identifier] }], viewer.readRelays, query.relays);
           const found = eventsOf(fetched).sort((a, b) => b.created_at - a.created_at)[0];
           if (found) {
@@ -125,6 +137,12 @@
 {#if error}<p class="note error" role="alert">{error}</p>{/if}
 {#if busy}<p class="note">開いています…</p>{/if}
 
+{#if !search && !error && !busy && history.length > 0}
+  <div class="history">
+    <div class="history-head"><strong>最近の検索</strong><button type="button" class="link" onclick={() => { clearSearchHistory(viewer.pubkey); history = []; }}>すべて削除</button></div>
+    {#each history as item (item)}<a href={searchHref(item)}><Icon name="history" size={16} />{item}</a>{/each}
+  </div>
+{/if}
 {#if !search && !error && !busy}
   <div class="help">
     <p>キーワードは NIP-50 に対応した検索リレーで探します{hasSearchRelays ? "" : "（検索リレーが設定されていません。設定の「検索リレー」で足せます）"}。</p>
@@ -134,9 +152,12 @@
 {/if}
 
 {#if search}
+  {@const notesOnly = search.results.filter((note) => note.kind !== 30023)}
+  {@const articles = search.results.filter((note) => note.kind === 30023)}
   <div class="tabs" role="tablist">
-    <button type="button" role="tab" aria-selected={tab === "posts"} class:active={tab === "posts"} onclick={() => (tab = "posts")}>投稿 {search.results.length}</button>
-    <button type="button" role="tab" aria-selected={tab === "people"} class:active={tab === "people"} onclick={() => (tab = "people")}>ユーザー {search.people.length}</button>
+    {#each [["all", "すべて"], ["people", `ユーザー ${search.people.length}`], ["posts", `投稿 ${notesOnly.length}`], ["articles", `記事 ${articles.length}`], ["tags", `タグ ${search.tags.length}`]] as [key, label] (key)}
+      <button type="button" role="tab" aria-selected={tab === key} class:active={tab === key} onclick={() => (tab = key as Tab)}>{label}</button>
+    {/each}
   </div>
   {#if search.statuses.length > 0}
     <ul class="statuses">
@@ -147,33 +168,92 @@
   {/if}
   {#if search.message}<p class="note">{search.message}</p>{/if}
 
-  {#if tab === "posts"}
-    {#each search.results as note (note.id)}
+  {#if tab === "tags" || (tab === "all" && search.tags.length > 0)}
+    <div class="tag-list">
+      {#each tab === "all" ? search.tags.slice(0, 12) : search.tags as tag (tag)}<a href={searchHref(`#${tag}`)}>#{tag}</a>{/each}
+      {#if tab === "tags" && search.tags.length === 0}<p class="note">{search.loading ? "探しています…" : "タグはありません"}</p>{/if}
+    </div>
+  {/if}
+  {#if tab === "all" && search.people.length > 0}
+    {#each search.people.slice(0, 3) as pubkey (pubkey)}{@render person(pubkey)}{/each}
+    {#if search.people.length > 3}<button type="button" class="link see-all" onclick={() => (tab = "people")}>ユーザーをすべて見る（{search.people.length}）</button>{/if}
+  {/if}
+  {#if tab === "all" || tab === "posts" || tab === "articles"}
+    {#each tab === "posts" ? notesOnly : tab === "articles" ? articles : search.results as note (note.id)}
       <div class="item"><NoteCard {note} /></div>
     {:else}
-      <p class="note">{search.loading ? "探しています…" : "見つかりませんでした"}</p>
+      {#if settings.peusaMode && !search.loading}<PeusaEmpty picture="empty-search" message="見つかりませんでした" />{:else}<p class="note">{search.loading ? "探しています…" : "見つかりませんでした"}</p>{/if}
     {/each}
     {#if search.results.length > 0 && !search.finished}
       <div class="footer"><button type="button" class="more" onclick={() => search?.more()} disabled={search.loading}>{search.loading ? "探しています…" : "さらに探す"}</button></div>
     {/if}
-  {:else}
+  {:else if tab === "people"}
     {#each search.people as pubkey (pubkey)}
-      {@const profile = profiles.get(pubkey)?.profile}
-      <a class="person" href={profileHref(pubkey)}>
-        <Avatar {pubkey} size={44} />
-        <span class="info">
-          <strong>{displayName(pubkey)}</strong>
-          {#if profile?.nip05}<small>{profile.nip05.replace(/^_@/, "")}</small>{/if}
-          {#if profile?.about}<span class="about">{profile.about}</span>{/if}
-        </span>
-      </a>
+      {@render person(pubkey)}
     {:else}
-      <p class="note">{search.loading ? "探しています…" : "見つかりませんでした"}</p>
+      {#if settings.peusaMode && !search.loading}<PeusaEmpty picture="empty-search" message="見つかりませんでした" />{:else}<p class="note">{search.loading ? "探しています…" : "見つかりませんでした"}</p>{/if}
     {/each}
   {/if}
 {/if}
 
+{#snippet person(pubkey: string)}
+  {@const profile = profiles.get(pubkey)?.profile}
+  <a class="person" href={profileHref(pubkey)}>
+    <Avatar {pubkey} size={44} />
+    <span class="info">
+      <strong>{displayName(pubkey)}</strong>
+      {#if profile?.nip05}<small>{profile.nip05.replace(/^_@/, "")}</small>{/if}
+      {#if profile?.about}<span class="about">{profile.about}</span>{/if}
+    </span>
+  </a>
+{/snippet}
+
 <style>
+  .history {
+    padding: 8px 16px;
+    border-bottom: 1px solid var(--outline-variant);
+  }
+  .history-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .history a {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 0;
+    color: var(--text);
+    text-decoration: none;
+  }
+  .link {
+    padding: 4px 8px;
+    font: inherit;
+    font-size: 0.85em;
+    color: var(--primary);
+    background: none;
+    border: none;
+    cursor: pointer;
+  }
+  .see-all {
+    display: block;
+    margin: 4px 12px 8px;
+  }
+  .tag-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 8px 16px;
+    border-bottom: 1px solid var(--outline-variant);
+  }
+  .tag-list a {
+    padding: 2px 10px;
+    font-size: 0.9em;
+    color: var(--primary);
+    text-decoration: none;
+    background: var(--secondary-container);
+    border-radius: 999px;
+  }
   .item {
     content-visibility: auto;
     contain-intrinsic-size: auto 200px;

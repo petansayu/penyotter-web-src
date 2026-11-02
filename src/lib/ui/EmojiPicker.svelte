@@ -8,12 +8,13 @@
 
   /**
    * 絵文字のパレット（Android 版の ReactionDialog と投稿欄の絵文字）。「標準」はすべての Unicode 絵文字、「カスタム」は
-   * 自分のカスタム絵文字（NIP-30）。選んだら pick を呼ぶ。placement は開く向き（投稿欄では上に開く）。
+   * 自分のカスタム絵文字（NIP-30）。選んだら pick を呼ぶ。placement は開く向き（投稿欄では上に開く）。inline は
+   * 重ねずに並びの中に置く（カラム表示の左に置いた投稿欄。上に開くと画面の上にはみ出し、幅も入りきらなかった）。
    */
   let { pick: chosen, close, placement = "below", title = "リアクション", hiddenInput = false }: {
     pick: (content: string, emoji?: CustomEmoji) => void;
     close: () => void;
-    placement?: "below" | "above";
+    placement?: "below" | "above" | "inline";
     title?: string;
     /** リアクションのとき、押した絵文字の後ろに隠しメッセージ（セクシー餃子）を付ける入力欄を出す（Android 版の ReactionDialog）。 */
     hiddenInput?: boolean;
@@ -46,7 +47,7 @@
   </div>
   {#if hiddenInput}
     <label class="secret">
-      <span>🥟</span>
+      <span>🐇</span>
       <input type="text" bind:value={secret} placeholder="隠しメッセージ（任意）" aria-label="リアクションに付ける隠しメッセージ" />
       {#if secret}<small class:over={secretBytes > MAX_HIDDEN_BYTES}>{secretBytes}/{MAX_HIDDEN_BYTES}</small>{/if}
     </label>
@@ -129,6 +130,11 @@
   }
   .picker.above {
     bottom: 100%;
+  }
+  .picker.inline {
+    position: static;
+    width: auto;
+    margin-top: 8px;
   }
   .tabs {
     display: flex;

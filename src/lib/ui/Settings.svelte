@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { peusa } from "../store/peusa.svelte";
   import { nip19 } from "nostr-tools";
   import { UPLOAD_SERVERS } from "../domain/media";
   import { MAX_EACH, relayChanges, relayEntries, relayProblem, type RelayEntry } from "../domain/relayList";
@@ -8,7 +9,7 @@
   import { dms } from "../store/dm.svelte";
   import { summary } from "../store/publishSummary";
   import { remoteState } from "../nostr/remoteSigner";
-  import { SETTINGS_TITLES, type SettingsPage } from "../router.svelte";
+  import { relayHref, SETTINGS_TITLES, type SettingsPage } from "../router.svelte";
   import { deleteViewerData } from "../store/db";
   import { emojis } from "../store/emojis.svelte";
   import { GLOBAL_RELAY_SUGGESTIONS, globalRelays, saveGlobalRelays } from "../store/global";
@@ -22,6 +23,7 @@
   import { loadOwnBlossomServers, publishBlossomServers } from "../store/blossomServers.svelte";
   import Avatar from "./Avatar.svelte";
   import { displayName, requestProfiles } from "../store/cache.svelte";
+  import { pool } from "../nostr/pool";
   import Icon, { type IconName } from "./Icon.svelte";
   import { GROUP_LABELS, schemeFor, THEMES } from "./themes";
 
@@ -177,6 +179,16 @@
   // ---- 画像投稿先
   let uploadChoice = $state(uploadServer(viewer.pubkey));
   let protocolMessage = $state<string | null>(null);
+
+  // リレーの接続の状況（Android 版の設定「リレー」のトップ）。2 秒ごとに見直す
+  const STATUS_LABELS = { connected: "接続中", connecting: "接続しています", closed: "未接続", unavailable: "応答なし（しばらく使いません）" } as const;
+  const statusRelays = $derived([...new Set([...viewer.readRelays, ...viewer.writeRelays])]);
+  let statusTick = $state(0);
+  $effect(() => {
+    if (page !== "relays") return;
+    const timer = setInterval(() => statusTick++, 2000);
+    return () => clearInterval(timer);
+  });
   // アカウントの一覧の名前とアイコン
   $effect(() => {
     if (page === "account") requestProfiles(viewer.accounts.map((a) => a.pubkey));
@@ -268,6 +280,21 @@
     { name: "emojibase-data（絵文字ピッカーの絵文字と名前）", holder: "Miles Johnson", license: "MIT License" },
     { name: "Material Design Icons", holder: "Google LLC", license: "Apache License 2.0" },
   ];
+
+  // 「このアプリについて」のアイコンを、1.5 秒以内の間隔で 5 回押すとスーパーぺぇうさモード
+  let iconTaps = 0;
+  let lastIconTap = 0;
+  function tapIcon() {
+    const now = Date.now();
+    iconTaps = now - lastIconTap < 1500 ? iconTaps + 1 : 1;
+    lastIconTap = now;
+    if (iconTaps < 5) return;
+    iconTaps = 0;
+    if (settings.peusaMode) return;
+    settings.peusaUnlocked = true;
+    settings.peusaMode = true;
+    peusa.unlocking = true;
+  }
 </script>
 
 {#snippet switchRow(label: string, checked: boolean, change: (value: boolean) => void, detail?: string)}
@@ -346,6 +373,21 @@
       <button type="button" class="outline" onclick={() => { viewer.clear(); location.hash = "#/"; }}>このアカウントを外す</button>
 
     {:else if page === "relays"}
+      <h3>常時接続</h3>
+      <p class="muted">下の「読み込みリレー」のうち、普段から接続しておく数です。少ないほど通信量を抑えられ、多いほど投稿を拾いやすくなります。迷ったら 6 件のままで問題ありません。選ぶとすぐに保存して、ホームを読み直します。</p>
+      <div class="segmented limits" role="radiogroup" aria-label="常時接続の数">
+        {#each [3, 6, 9, 12] as value (value)}
+          <button type="button" role="radio" aria-checked={viewer.activeLimit === value} class:active={viewer.activeLimit === value} onclick={() => { viewer.setActiveLimit(value); void home.following?.start(); void home.global?.start(); }}>{value}</button>
+        {/each}
+      </div>
+      <h3>接続の状況</h3>
+      <p class="muted">常時接続 {Math.min(viewer.activeLimit, viewer.readRelays.length)}件 / ほかに使うリレー {Math.max(0, statusRelays.length - Math.min(viewer.activeLimit, viewer.readRelays.length))}件</p>
+      <ul class="relay-status">
+        {#each statusRelays as url (url)}
+          {@const state = (void statusTick, pool.status(url))}
+          <li><span class="dot {state}" aria-hidden="true"></span><a href={relayHref(url)}>{url.replace(/^wss:\/\//, "")}</a><small>{STATUS_LABELS[state]}{viewer.alwaysOn.includes(url) ? "・常時接続" : ""}</small></li>
+        {/each}
+      </ul>
       {#if viewer.relayListChange}
         {@const change = relayEntries(viewer.relayListChange)}
         <div class="change">
@@ -493,6 +535,8 @@
       {@render switchRow("アバターを表示", settings.showAvatars, (value) => (settings.showAvatars = value))}
       {@render switchRow("投稿元クライアントを表示", settings.showClientTags, (value) => (settings.showClientTags = value))}
       {@render switchRow("ステータスを投稿に表示", settings.showStatuses, (value) => (settings.showStatuses = value))}
+      {@render switchRow("「ここまで読みました」の線を出す", settings.readMarker, (value) => (settings.readMarker = value))}
+      {@render switchRow("話題を追う道具を使う", settings.topicTools, (value) => (settings.topicTools = value), "ホームの「いまの話題」、投稿欄の「直前の流れ」、投稿の「…」の「たぶんこの流れ」です。")}
       {@render switchRow("横長の画面ではカラムに並べる", settings.columns, (value) => (settings.columns = value), "幅が 1,100 ピクセル以上の画面では、ホーム・通知などを横に並べて表示します（Web 版だけ）。")}
       <h3>画像と通信量</h3>
       {@render switchRow("アイコン画像を読み込む", settings.avatarPictures, (value) => (settings.avatarPictures = value))}
@@ -503,6 +547,11 @@
       <p class="muted">画像の自動表示をオフにすると、本文と操作だけを先に表示して通信量を抑えます。アイコン画像の読み込みをオフにすると、ほかの人のプロフィール画面を除いて、ぺにょったーのオリジナルアバターで表示します。リンクプレビューは、Web 版ではまだありません。</p>
       <h3>センシティブ</h3>
       {@render switchRow("センシティブ投稿を常に表示", settings.revealSensitive, (value) => (settings.revealSensitive = value))}
+      {#if settings.peusaUnlocked}
+        <h3>スーパーぺぇうさモード</h3>
+        {@render switchRow("スーパーぺぇうさモード", settings.peusaMode, (value) => (settings.peusaMode = value), "オンの間は、ぺぇうさの色になり、あちこちにぺぇうさが出てきます（このブラウザの画面だけで、ほかの人からの見え方は変わりません）。強さは、弱：アイコンはそのまま、中：みんなのアイコンがぺぇうさ（自分は季節のぺぇうさ）、強：チャンネルや画面下のタブ・メニューのアイコンもぺぇうさになり、画面の端からぺぇうさがのぞき、押すと水色のハートが飛び散ります。")}
+        {#if settings.peusaMode}{@render segmented("ぺぇうさモードの強さ", [["weak", "弱"], ["medium", "中"], ["strong", "強"]], settings.peusaLevel, (value) => (settings.peusaLevel = value as typeof settings.peusaLevel))}{/if}
+      {/if}
 
     {:else if page === "theme"}
       {#each groups as { group, themes } (group)}
@@ -535,8 +584,10 @@
         <button type="button" class="outline" onclick={() => { try { navigator.registerProtocolHandler("web+nostr", `${location.origin}${location.pathname}#/open?uri=%s`); protocolMessage = "ブラウザに登録を頼みました（ブラウザの確かめの表示が出ることがあります）"; } catch (e) { protocolMessage = e instanceof Error ? e.message : String(e); } }}>このアプリで開くようにする</button>
         {#if protocolMessage}<p class="muted">{protocolMessage}</p>{/if}
       {/if}
+      <!-- アイコンを続けて 5 回押すと、スーパーぺぇうさモード（Android 版と同じ） -->
+      <button type="button" class="app-icon" onclick={tapIcon} aria-label="アプリのアイコン" data-testid="about-icon"><img src="icons/icon-192.png" alt="" width="64" height="64" /></button>
       <p class="app-name">ぺにょったー（Web 版）</p>
-      <p class="muted">バージョン {__APP_VERSION__}（{__BUILD_DATE__}）</p>
+      <p class="muted">バージョン {__APP_VERSION__}</p>
       <p>ぺぇのつくった Nostr クライアント</p>
       <h3>ご利用にあたって</h3>
       <ul class="notes">
@@ -565,6 +616,47 @@
 {/if}
 
 <style>
+  .limits {
+    margin: 6px 0 12px;
+  }
+  .relay-status {
+    margin: 4px 0 12px;
+    padding: 0;
+    list-style: none;
+  }
+  .relay-status li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0;
+    font-size: 0.9em;
+  }
+  .relay-status a {
+    flex: 1;
+    min-width: 0;
+    overflow-wrap: anywhere;
+    color: var(--text);
+    text-decoration: none;
+  }
+  .relay-status small {
+    color: var(--muted);
+  }
+  .dot {
+    flex: none;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--outline);
+  }
+  .dot.connected {
+    background: #3a9a5b;
+  }
+  .dot.connecting {
+    background: #d9a400;
+  }
+  .dot.unavailable {
+    background: #c33;
+  }
   .accounts {
     margin: 0 0 8px;
     padding: 0;
@@ -959,6 +1051,19 @@
     height: 22px;
     border-radius: 50%;
     border: 2px solid;
+  }
+  .app-icon {
+    display: block;
+    margin-top: 12px;
+    padding: 0;
+    background: none;
+    border: none;
+    border-radius: 16px;
+    overflow: hidden;
+    cursor: pointer;
+  }
+  .app-icon img {
+    display: block;
   }
   .app-name {
     margin: 12px 0 0;

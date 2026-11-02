@@ -20,6 +20,16 @@
   import { pool } from "./lib/nostr/pool";
   import RouteView from "./lib/ui/RouteView.svelte";
   import ListConfirmDialog from "./lib/ui/ListConfirmDialog.svelte";
+  import EmojiPackSheet from "./lib/ui/EmojiPackSheet.svelte";
+  import FlowSummary from "./lib/ui/FlowSummary.svelte";
+  import HoverProfileCard from "./lib/ui/HoverProfileCard.svelte";
+  import JumpDialog from "./lib/ui/JumpDialog.svelte";
+  import MiniAppsDialog from "./lib/ui/MiniAppsDialog.svelte";
+  import PeusaLayer from "./lib/ui/PeusaLayer.svelte";
+  import PeusaMood from "./lib/ui/PeusaMood.svelte";
+  import { peusaFailure, peusaPicture } from "./lib/store/peusa.svelte";
+  import { jumpDialog } from "./lib/store/jump.svelte";
+  import { miniAppsDialog } from "./lib/store/miniApps.svelte";
   import Setup from "./lib/ui/Setup.svelte";
 
   // 設定が変わるたびに当て直して保存する（apply が読む項目が変わると、もう一度走る）
@@ -33,6 +43,7 @@
     if (!pubkey) return;
     return untrack(() => {
       deck.load(pubkey);
+      viewer.restoreMutes(pubkey);
       home.open(pubkey);
       actions.load();
       notifications.prepare(pubkey);
@@ -167,6 +178,7 @@
       <a class="logo" href="#/" onclick={tapHome}>ぺにょったー</a>
       <span class="badge">{viewer.canSign ? "Web 版" : "Web 版・見るだけ"}</span>
       {#if TEST_RELAY}<span class="badge test">テストモード</span>{/if}
+      {#if settings.peusaMode && onHome}<PeusaMood />{/if}
     </header>
 
     {#if pullDistance > 0 || refreshing}
@@ -180,16 +192,16 @@
     </main>
 
     <nav class="tabs" class:hidden-by-keyboard={typing}>
-      <a href="#/" class:active={onHome} onclick={tapHome}><span><Icon name="home" /></span>ホーム</a>
+      <a href="#/" class:active={onHome} onclick={tapHome}><span><Icon name="home" peusa={0} /></span>ホーム</a>
       <a href="#/notifications" class:active={route.name === "notifications"} onclick={(event) => {
         if (route.name === "notifications") { event.preventDefault(); window.scrollTo({ top: 0, behavior: "smooth" }); }
       }}>
-        <span class="badged"><Icon name="notificationsNone" />{#if notifications.unread > 0}<i class="badge-dot" aria-label="未読があります"></i>{/if}</span>通知
+        <span class="badged"><Icon name="notificationsNone" peusa={1} />{#if notifications.unread > 0}<i class="badge-dot" aria-label="未読があります"></i>{/if}</span>通知
       </a>
-      <a href="#/search" class:active={route.name === "search"}><span><Icon name="search" /></span>検索</a>
-      <a href="#/chat" class:active={route.name === "chat"}><span><Icon name="forum" /></span>チャット</a>
+      <a href="#/search" class:active={route.name === "search"}><span><Icon name="search" peusa={2} /></span>検索</a>
+      <a href="#/chat" class:active={route.name === "chat"}><span><Icon name="forum" peusa={3} /></span>チャット</a>
       <button type="button" class:active={inMore || moreOpen} onclick={() => (moreOpen = !moreOpen)} aria-expanded={moreOpen}>
-        <span class="badged"><Icon name="menu" />{#if dms.unreadCount > 0}<i class="badge-dot" aria-label="DM の未読があります"></i>{/if}</span>その他
+        <span class="badged"><Icon name="menu" peusa={4} />{#if dms.unreadCount > 0}<i class="badge-dot" aria-label="DM の未読があります"></i>{/if}</span>その他
       </button>
     </nav>
   {/if}
@@ -198,18 +210,26 @@
     <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
     <div class="more-back" onclick={() => (moreOpen = false)}>
       <nav class="more-sheet" aria-label="その他">
-        <a href={profileHref(viewer.pubkey)} onclick={() => (moreOpen = false)}><Icon name="person" />プロフィール</a>
-        <a href="#/messages" onclick={() => (moreOpen = false)}><Icon name="mail" />DM{#if dms.unreadCount > 0}<span class="count">{dms.unreadCount}</span>{/if}</a>
-        <a href="#/lists" onclick={() => (moreOpen = false)}><Icon name="listAlt" />リスト</a>
-        <a href="#/bookmarks" onclick={() => (moreOpen = false)}><Icon name="bookmarkBorder" />ブックマーク</a>
-        <a href="#/settings" onclick={() => (moreOpen = false)}><Icon name="settings" />設定</a>
+        <a href={profileHref(viewer.pubkey)} onclick={() => (moreOpen = false)}><Icon name="person" peusa={5} />プロフィール</a>
+        <a href="#/messages" onclick={() => (moreOpen = false)}><Icon name="mail" peusa={6} />DM{#if dms.unreadCount > 0}<span class="count">{dms.unreadCount}</span>{/if}</a>
+        <a href="#/lists" onclick={() => (moreOpen = false)}><Icon name="listAlt" peusa={7} />リスト</a>
+        <a href="#/bookmarks" onclick={() => (moreOpen = false)}><Icon name="bookmarkBorder" peusa={8} />ブックマーク</a>
+        <button type="button" onclick={() => { moreOpen = false; jumpDialog.open = true; }}><Icon name="history" peusa={9} />日時を指定して見る</button>
+        <button type="button" onclick={() => { moreOpen = false; miniAppsDialog.open = true; }}><Icon name="apps" peusa={10} />ミニアプリ</button>
+        <a href="#/settings" onclick={() => (moreOpen = false)}><Icon name="settings" peusa={11} />設定</a>
       </nav>
     </div>
   {/if}
   <!-- チャットと DM には自分の入力欄があるので、投稿欄は引用するときだけ出す（Android 版と同じ） -->
   {#if viewer.canSign && !deck.active && (composer.open || (route.name !== "chat" && route.name !== "messages"))}<Composer />{/if}
+  <EmojiPackSheet />
+  <FlowSummary />
+  <HoverProfileCard />
+  <JumpDialog />
+  <MiniAppsDialog />
+  {#if settings.peusaMode}<PeusaLayer />{/if}
   <ListConfirmDialog />
-  {#if toast.message}<div class="toast" role="status">{toast.message}</div>{/if}
+  {#if toast.message}<div class="toast" role="status">{#if settings.peusaMode && peusaFailure(toast.message)}<img class="toast-peusa" src={peusaPicture("error-noChar")} alt="" width="44" height="44" data-testid="peusa-error" />{/if}{toast.message}</div>{/if}
   {#if pwa.updateReady}
     <div class="update" role="status">
       新しい版があります
@@ -271,6 +291,10 @@
     color: var(--primary);
     cursor: pointer;
   }
+  .toast-peusa {
+    vertical-align: middle;
+    margin-right: 8px;
+  }
   .toast {
     position: fixed;
     left: 50%;
@@ -306,6 +330,7 @@
   }
   .tabs {
     position: fixed;
+    z-index: 20;
     bottom: 0;
     left: 50%;
     transform: translateX(-50%);
@@ -360,7 +385,8 @@
     background: var(--container);
     border-radius: 16px 16px 0 0;
   }
-  .more-sheet a {
+  .more-sheet a,
+  .more-sheet button {
     display: flex;
     align-items: center;
     gap: 16px;
@@ -368,7 +394,16 @@
     color: var(--text);
     text-decoration: none;
   }
-  .more-sheet a:hover {
+  .more-sheet button {
+    width: 100%;
+    font: inherit;
+    text-align: left;
+    background: none;
+    border: none;
+    cursor: pointer;
+  }
+  .more-sheet a:hover,
+  .more-sheet button:hover {
     background: var(--surface-low);
   }
   .more-sheet .count {

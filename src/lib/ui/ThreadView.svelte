@@ -10,11 +10,19 @@
   import Avatar from "./Avatar.svelte";
   import Icon from "./Icon.svelte";
   import NoteCard from "./NoteCard.svelte";
+  import PackEmoji from "./PackEmoji.svelte";
+  import MutedNote from "./MutedNote.svelte";
+  import { quotesOf } from "../store/conversation.svelte";
+  import { isMuted, mutedLabel } from "../store/mutes";
+  import { settings } from "../store/settings.svelte";
 
   /** 投稿の詳細（技術資料 5.4）。返信元・選んだ投稿・返信（字下げ）を並べる。 */
   let { id, relays = [], author }: { id: string; relays?: string[]; author?: string } = $props();
 
   let thread = $state<Thread>();
+  /** この投稿を引用した投稿（null は読み込み中）。 */
+  let quotes = $state<Event[] | null>(null);
+  let quotesOpen = $state(false);
   let reactionsOpen = $state(false);
   let repostsOpen = $state(false);
   /** 反応を開いたリアクション。 */
@@ -52,6 +60,9 @@
     return untrack(() => {
       const current = new Thread(key, hints, by);
       thread = current;
+      quotes = null;
+      quotesOpen = false;
+      void quotesOf(key, by, hints).then((found) => thread === current && (quotes = found), () => thread === current && (quotes = []));
       reactionsOpen = false;
       repostsOpen = false;
       openNested = new Set();
@@ -59,18 +70,34 @@
       return () => current.stop();
     });
   });
+
+  /** 返信一覧からは、ミュートしている投稿と、それへの返信（字下げで下に続く分）を除く。 */
+  const shownReplies = $derived.by(() => {
+    const replies = thread?.replies ?? [];
+    const result: typeof replies = [];
+    let skipBelow: number | null = null;
+    for (const reply of replies) {
+      if (skipBelow !== null && reply.depth > skipBelow) continue;
+      skipBelow = null;
+      if (isMuted(reply.event)) skipBelow = reply.depth;
+      else result.push(reply);
+    }
+    return result;
+  });
 </script>
 
-{#snippet emoji(shown: { text: string; url?: string; hidden?: string })}
+{#snippet emoji(shown: { text: string; url?: string; hidden?: string }, event: Event)}
   {#if shown.hidden}
     <HiddenMessage visible={shown.text} message={shown.hidden} dialog>{#if shown.url}<img src={shown.url} alt={shown.text} referrerpolicy="no-referrer" />{:else}{shown.text}{/if}</HiddenMessage>
-  {:else if shown.url}<img src={shown.url} alt={shown.text} referrerpolicy="no-referrer" />{:else}{shown.text}{/if}
+  {:else if shown.url}<PackEmoji shortcode={shown.text.slice(1, -1)} url={shown.url} tags={event.tags} owner={event.pubkey} />{:else}{shown.text}{/if}
 {/snippet}
 
 {#if thread}
   {#if thread.ancestors?.truncated}<p class="note">返信元をすべては表示していません</p>{/if}
   {#each thread.ancestors?.ancestors ?? [] as note (note.id)}
-    <NoteCard {note} />
+    <!-- 返信元の流れのミュートしている投稿は、流れが途切れないよう札にする（設定で「完全に隠す」なら詰める） -->
+    {#if !isMuted(note)}<NoteCard {note} />
+    {:else if !settings.hideMuted}<div class="muted-ancestor"><MutedNote label={mutedLabel(note)}><NoteCard {note} /></MutedNote></div>{/if}
   {/each}
   {#if thread.selected}
     {#if thread.selected.kind === 30023}
@@ -93,7 +120,7 @@
           {@const nested = thread.reactionReactions.get(reaction.id) ?? []}
           <li>
             <a href={profileHref(reaction.pubkey)}><Avatar pubkey={reaction.pubkey} size={28} /><strong>{displayName(reaction.pubkey)}</strong></a>
-            <span class="emoji">{@render emoji(shown)}</span>
+            <span class="emoji">{@render emoji(shown, reaction)}</span>
             {#if nested.length > 0}
               <button type="button" class="chips" class:open={openNested.has(reaction.id)} onclick={() => toggleNested(reaction.id)} aria-label={openNested.has(reaction.id) ? "このリアクションへの反応をたたむ" : "このリアクションへの反応を見る"}>
                 {#each countsOf(nested).slice(0, 3) as group (group.event.id)}
@@ -109,7 +136,7 @@
               {@const g = label(inner)}
               <li class="inner">
                 <a href={profileHref(inner.pubkey)}><Avatar pubkey={inner.pubkey} size={22} /><strong>{displayName(inner.pubkey)}</strong></a>
-                <span class="emoji">{@render emoji(g)}</span>
+                <span class="emoji">{@render emoji(g, inner)}</span>
               </li>
             {/each}
           {/if}
@@ -128,15 +155,43 @@
     <button type="button" class="new-replies" onclick={() => thread?.acknowledgeReplies()}>新しい返信 {thread.pendingReplies.length}件</button>
   {/if}
   {#if thread.message}<p class="note">{thread.message}</p>{/if}
-  {#each thread.replies as reply (reply.event.id)}
+  {#each shownReplies as reply (reply.event.id)}
     <div class="reply" style:padding-left="{Math.min(reply.depth, 6) * 16}px">
       <NoteCard note={reply.event} />
     </div>
   {/each}
-  {#if thread.loading}<p class="note">読み込んでいます…</p>{:else if thread.selected && thread.replies.length === 0}<p class="note">返信はまだありません</p>{/if}
+  {#if thread.loading}<p class="note">読み込んでいます…</p>{:else if thread.selected && shownReplies.length === 0}<p class="note">返信はまだありません</p>{/if}
+  {#if thread.selected && quotes && quotes.length > 0}
+    <!-- この投稿を引用した投稿（Android 版と同じ。q タグで指すもの） -->
+    <button type="button" class="quotes-toggle" aria-expanded={quotesOpen} onclick={() => (quotesOpen = !quotesOpen)}>
+      引用した投稿（{quotes.length}）{quotesOpen ? "▲" : "▼"}
+    </button>
+    {#if quotesOpen}
+      {#each quotes as quote (quote.id)}<div class="quote-item"><NoteCard note={quote} /></div>{/each}
+    {/if}
+  {/if}
 {/if}
 
 <style>
+  .quotes-toggle {
+    display: block;
+    width: 100%;
+    padding: 12px 16px;
+    font: inherit;
+    font-weight: 600;
+    text-align: left;
+    color: var(--primary);
+    background: none;
+    border: none;
+    border-top: 1px solid var(--outline-variant);
+    cursor: pointer;
+  }
+  .quote-item {
+    border-top: 1px solid var(--outline-variant);
+  }
+  .muted-ancestor {
+    padding: 0 16px 8px;
+  }
   .note,
   .relays {
     color: var(--muted);
@@ -210,6 +265,7 @@
     color: var(--muted);
   }
   .emoji img,
+  .emoji :global(.pack-emoji img),
   .chips img {
     height: 1.2em;
     vertical-align: middle;

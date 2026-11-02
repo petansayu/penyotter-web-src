@@ -51,6 +51,11 @@ class RelayConnection {
 
   constructor(readonly url: string, private readonly pool: RelayPool) {}
 
+  /** 接続の状況（設定の画面に出す）。 */
+  get state(): "connected" | "connecting" | "closed" {
+    return this.open ? "connected" : this.ws ? "connecting" : "closed";
+  }
+
   /** REQ を送る（または順番待ちに入れる）。close で閉じ、sent でもう送ったかを返す。 */
   req(filters: Filter[], handlers: Omit<SubHandlers, "filters" | "sent">): { close: () => void; sent: () => boolean } {
     const id = subId();
@@ -287,6 +292,12 @@ export class RelayPool {
   authenticator: ((url: string, challenge: string) => Promise<Event | null>) | null = null;
   private readonly unavailable = new Map<string, number>();
 
+  /** 接続の状況。使えないとみなしている間は unavailable。まだつないでいないものは closed。 */
+  status(url: string): "connected" | "connecting" | "closed" | "unavailable" {
+    if (!this.available(url)) return "unavailable";
+    return this.connections.get(url)?.state ?? "closed";
+  }
+
   connection(url: string): RelayConnection {
     return this.relay(url);
   }
@@ -340,7 +351,8 @@ export class RelayPool {
         // 「使えない」とみなすのは、9 秒の打ち切りまで EOSE もイベントも返さなかったリレーだけ（技術資料 4.2）。
         // 最初の EOSE のあとの打ち切りや、短い打ち切り（アウトボックスの 4 秒）で答えていないだけのリレーは外さない
         if (timedOut && limit >= ONE_SHOT_LIMIT) for (const url of targets) if (!heard.has(url) && !unsent.has(url)) this.markUnavailable(url);
-        const complete = eosed.size === targets.length || (cut && eosed.size * 2 >= targets.length);
+        // 全部のリレーが終わったとき（断ったリレーがあっても）は、打ち切ったときと同じく半分以上の EOSE で足りる
+        const complete = eosed.size === targets.length || ((cut || done.size === targets.length) && eosed.size * 2 >= targets.length);
         resolve({ events, complete });
       };
       const overall = setTimeout(() => finish(false, true), limit);

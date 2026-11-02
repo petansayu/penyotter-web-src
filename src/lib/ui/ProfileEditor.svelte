@@ -25,6 +25,7 @@
     { field: "website", label: "ウェブサイト", placeholder: "https://…" },
     { field: "nip05", label: "NIP-05", placeholder: "name@example.com" },
     { field: "lud16", label: "ライトニングアドレス（zap の受け取り）", placeholder: "name@example.com" },
+    { field: "birthday", label: "誕生日", placeholder: "2000/4/12（年・月・日は省略可。例: /4/12）" },
   ];
 
   onMount(() => {
@@ -76,6 +77,7 @@
   {#if !values}
     <p class="muted">{error ?? "リレーからプロフィールを読んでいます…"}</p>
   {:else}
+    <label class="check-row"><input type="checkbox" checked={values.bot === "true"} onchange={(event) => { if (values) values.bot = event.currentTarget.checked ? "true" : "false"; }} /><span>BOT アカウント<small>投稿の全部または一部を自動生成するアカウント</small></span></label>
     {#each FIELDS as { field, label, placeholder, long } (field)}
       <label>
         <span>{label}</span>
@@ -105,6 +107,19 @@
 </section>
 
 <style>
+  .check-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin: 8px 0;
+  }
+  .check-row span {
+    display: grid;
+  }
+  .check-row small {
+    color: var(--muted);
+    font-size: 0.8em;
+  }
   .editor {
     display: grid;
     gap: 10px;

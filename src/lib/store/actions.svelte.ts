@@ -1,14 +1,17 @@
 import { SvelteMap, SvelteSet } from "svelte/reactivity";
+import { verifyEvent } from "nostr-tools";
+import { broadcastRefusal } from "../domain/broadcast";
 import { addressee, buildDeletion, buildEvent, buildRepost, buildUndo } from "../domain/publishing";
 import type { Event } from "../nostr/events";
 import { fetchFromAuthor, loadRelayLists, relayLists } from "../nostr/outbox";
-import { delay, publish, type PublishResult } from "../nostr/pool";
+import { delay, eventsOf, publish, type PublishResult } from "../nostr/pool";
 import { relaySet } from "../nostr/relayUrl";
 import { keepNotes } from "./cache.svelte";
 import { removeFromScope } from "./db";
 import { deletedNotes, droppedNotes, saveDeleted } from "./interactions.svelte";
 import { summary } from "./publishSummary";
 import { settings } from "./settings.svelte";
+import { peusa } from "./peusa.svelte";
 import { toast } from "./toast.svelte";
 import { viewer } from "./viewer.svelte";
 
@@ -184,6 +187,33 @@ class Actions {
     });
   }
 
+  /**
+   * ブロードキャスト（Android 版の HomeModel.broadcast）: 署名済みの投稿をそのまま自分の書き込みリレーへ送る。手元の
+   * 投稿の署名が確かめられなければ、作者のリレーから読み直す。
+   */
+  async broadcast(note: Event) {
+    const me = viewer.pubkey;
+    if (!me || this.busy.has(note.id)) return;
+    if (viewer.writeRelays.length === 0) return toast.show("書き込みリレーがありません");
+    this.busy.add(note.id);
+    try {
+      let event: Event | undefined = note.sig && verifyEvent(note) ? note : undefined;
+      if (!event) {
+        const fetched = await fetchFromAuthor(note.pubkey, [{ ids: [note.id], limit: 1 }], viewer.readRelays);
+        event = eventsOf(fetched).find((e) => e.id === note.id);
+      }
+      if (!event) return toast.show("投稿をリレーから読めませんでした（署名つきのものが必要です）");
+      const refusal = broadcastRefusal(event, me, deletedNotes);
+      if (refusal) return toast.show(refusal);
+      const result = await publish(viewer.writeRelays, event);
+      toast.show(result.accepted > 0 ? `書き込みリレーへ送りました（${summary(result)}）` : `ブロードキャストできませんでした（${summary(result)}）`);
+    } catch (e) {
+      toast.show(e instanceof Error ? e.message : String(e));
+    } finally {
+      this.busy.delete(note.id);
+    }
+  }
+
   private async run(id: string, task: () => Promise<PublishResult>) {
     if (this.busy.has(id) || !viewer.pubkey) return;
     this.busy.add(id);
@@ -205,6 +235,9 @@ class Actions {
     if (result.accepted > 0) {
       accepted?.(event);
       if (event.kind === 6 || event.kind === 16 || event.kind === 7) keepNotes([event], null);
+      // スーパーぺぇうさモードの間は、ぺぇうさがぽんと出る
+      if (event.kind === 7) peusa.celebrate("reacted");
+      else if (event.kind === 6 || event.kind === 16) peusa.celebrate("reposted");
     }
     return result;
   }

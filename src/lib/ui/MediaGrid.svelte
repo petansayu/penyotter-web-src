@@ -50,6 +50,17 @@
     return attachZoom(stage, (next) => (zoom = next), (direction) => media.length > 1 && step(direction));
   });
 
+  // 画像の外（黒いところ）を押すと閉じる。指でずらしたあとは閉じない（Android 版の ViewerImage）。拡大の操作が指を
+  // 捕まえる（setPointerCapture）と click は枠に届くので、画像の外かは押した時に見ておく
+  let downAt: { x: number; y: number; outside: boolean } | null = null;
+  function closeOutside(event: MouseEvent) {
+    const start = downAt;
+    downAt = null;
+    if (!start?.outside || Math.hypot(event.clientX - start.x, event.clientY - start.y) > 10) return;
+    dialog?.close();
+  }
+  const pressed = (event: PointerEvent) => (downAt = { x: event.clientX, y: event.clientY, outside: event.target === event.currentTarget });
+
   function keydown(event: KeyboardEvent) {
     if (event.key === "ArrowRight") step(1);
     if (event.key === "ArrowLeft") step(-1);
@@ -75,12 +86,14 @@
   {#if viewing !== null}
     {@const item = media[viewing]}
     {#if item.video}
-      <div class="viewer">
+      <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions (キーボードでは Esc で閉じる) -->
+      <div class="viewer" onpointerdown={pressed} onclick={closeOutside}>
         <!-- svelte-ignore a11y_media_has_caption -->
         <video src={item.url} controls autoplay playsinline></video>
       </div>
     {:else}
-      <div class="viewer zoomable" bind:this={stage}>
+      <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions (キーボードでは Esc で閉じる) -->
+      <div class="viewer zoomable" bind:this={stage} onpointerdown={pressed} onclick={closeOutside}>
         <img src={srcOf(item.url)} alt="" referrerpolicy="no-referrer" draggable="false" style:transform="translate({zoom.x}px, {zoom.y}px) scale({zoom.scale})" />
       </div>
     {/if}

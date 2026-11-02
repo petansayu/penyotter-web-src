@@ -18,7 +18,7 @@
   }
 </script>
 
-<button type="button" class="hidden-visible" class:open onclick={toggle} aria-expanded={open} title={open ? "隠しメッセージを閉じる" : "隠しメッセージを開く"} aria-label="{visible}（隠しメッセージを開く）">{#if children}{@render children()}{:else}{visible || "🥟"}{/if}</button>{#if open && !dialog}<span class="hidden-message" role="note">{message}</span>{/if}
+<button type="button" class="hidden-visible" class:open onclick={toggle} aria-expanded={open} title={open ? "隠しメッセージを閉じる" : "隠しメッセージを開く"} aria-label="{visible}（隠しメッセージを開く）">{#if children}{@render children()}{:else}{visible || "🐇"}{/if}</button>{#if open && !dialog}<span class="hidden-message" role="note">{message}</span>{/if}
 {#if dialog}
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
   <dialog bind:this={box} class="hidden-dialog" aria-label="隠しメッセージ" onclick={(event) => { event.stopPropagation(); if (event.target === box) box?.close(); }}>

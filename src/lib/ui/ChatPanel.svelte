@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { peusaFaceOf, peusaStrong } from "../store/peusa.svelte";
   import { tick, untrack } from "svelte";
   import { chatPlacement, messageReplyTo } from "../domain/chat";
   import { visibleText } from "../domain/hiddenMessages";
@@ -7,6 +8,9 @@
   import { nip19 } from "nostr-tools";
   import { profileHref } from "../router.svelte";
   import { actions } from "../store/actions.svelte";
+  import { reactionDisplay, PALETTE } from "../domain/emojis";
+  import { counts, requestInteractions } from "../store/interactions.svelte";
+  import EmojiPicker from "./EmojiPicker.svelte";
   import { displayName } from "../store/cache.svelte";
   import { chat } from "../store/chat.svelte";
   import { composer } from "../store/composer.svelte";
@@ -125,6 +129,19 @@
     }
   }
 
+  // 吹き出しの下のリアクションの数と自分のリアクション（Android 版の ReactionBadge）。新しい 100 件の数を読む
+  $effect(() => {
+    for (const message of shown.slice(-100)) untrack(() => requestInteractions(message));
+  });
+
+  /** メニューの上の段に並べるリアクション: 1 タップのものと標準の絵文字で 6 つ（Android 版の ChatMessageMenu）。 */
+  const quickReactions = $derived.by(() => {
+    const list: { content: string; emoji?: { shortcode: string; url: string } }[] = [{ content: settings.oneTap.content, emoji: settings.oneTap.emoji }];
+    for (const item of [{ text: "+" }, ...PALETTE]) if (!list.some((c) => c.content === item.text)) list.push({ content: item.text });
+    return list.slice(0, 6);
+  });
+  let paletteFor = $state<Event | null>(null);
+
   /** メニューを閉じてから、そのメッセージで操作する（閉じたあとは menuFor が空になるので先に取っておく）。 */
   function act(run: (message: Event) => void) {
     const message = menuFor;
@@ -172,7 +189,7 @@
     {#each list as item (item.id)}
       <li>
         <a href="#/chat/{item.id}" onclick={(event) => { event.preventDefault(); navigate(`#/chat/${item.id}`); }}>
-          {#if item.meta.picture}<img class="picture" src={item.meta.picture} alt="" referrerpolicy="no-referrer" />{:else}<span class="picture initial">{item.meta.name.slice(0, 1)}</span>{/if}
+          {#if peusaStrong()}<img class="picture" src={peusaFaceOf(item.id)} alt="" data-testid="channel-peusa" />{:else if item.meta.picture}<img class="picture" src={item.meta.picture} alt="" referrerpolicy="no-referrer" />{:else}<span class="picture initial">{item.meta.name.slice(0, 1)}</span>{/if}
           <span class="channel-text">
             <strong>{item.meta.name}</strong>
             {#if item.meta.about}<span>{item.meta.about}</span>{/if}
@@ -198,6 +215,8 @@
         {@const mine = message.pubkey === viewer.pubkey}
         {@const place = placement[i]}
         {@const parentId = messageReplyTo(message)}
+        {@const reacted = actions.reactionTo(message.id)}
+        {@const reactions = counts.get(message.id)?.reactions ?? 0}
         {#if place.day}<div class="day">{place.day}</div>{/if}
         <div class="bubble-row" class:mine class:grouped={place.grouped}>
           {#if !mine}
@@ -207,8 +226,15 @@
             {#if !mine && !place.grouped}<span class="name">{displayName(message.pubkey)}</span>{/if}
             {#if parentId}<span class="reply-line"><Icon name="reply" size={13} />{byId.get(parentId) ? `${displayName(byId.get(parentId)!.pubkey)}: ` : ""}{snippet(byId.get(parentId))}</span>{/if}
             <button type="button" class="bubble" onclick={() => (menuFor = message)} aria-label="メッセージの操作">
-              <Content text={message.content} emojis={emojisOf(message)} hidden />
+              <Content text={message.content} emojis={emojisOf(message)} hidden emojiFrom={{ tags: message.tags, owner: message.pubkey }} />
             </button>
+            {#if reactions > 0 || reacted}
+              {@const shownReaction = reacted ? reactionDisplay(reacted) : null}
+              <button type="button" class="badge" class:mine={!!reacted} onclick={() => (menuFor = message)} aria-label="リアクション {reactions} 件{reacted ? '（自分もリアクション済み）' : ''}">
+                {#if shownReaction?.type === "image"}<img src={shownReaction.url} alt=":{shownReaction.shortcode}:" referrerpolicy="no-referrer" />{:else if shownReaction?.type === "text"}{shownReaction.text}{:else}♡{/if}
+                {#if reactions > 0}<span>{reactions}</span>{/if}
+              </button>
+            {/if}
             <span class="time">{postTime(message.created_at, settings.timeDisplay, clock.now)}</span>
           </div>
         </div>
@@ -240,7 +266,16 @@
     <div class="sheet" role="menu" tabindex="-1" aria-label="メッセージの操作" onclick={(event) => event.stopPropagation()}>
       <p class="sheet-preview">{snippet(target)}</p>
       {#if viewer.canSign}
-        <button type="button" role="menuitem" onclick={() => act((m) => void actions.react(m, settings.oneTap.content, settings.oneTap.emoji))}>{settings.oneTap.content === "+" ? "♡" : settings.oneTap.content} でリアクション</button>
+        {@const reacted = actions.reactionTo(target.id)}
+        <div class="quick" role="group" aria-label="リアクション">
+          {#each quickReactions as choice (choice.content)}
+            <button type="button" class:chosen={reacted?.content === choice.content} onclick={() => act((m) => void actions.react(m, choice.content, choice.emoji))} aria-label="{choice.content === '+' ? 'いいね' : choice.content}でリアクション">
+              {#if choice.emoji}<img src={choice.emoji.url} alt=":{choice.emoji.shortcode}:" referrerpolicy="no-referrer" />{:else if choice.content === "+"}♡{:else}{choice.content}{/if}
+            </button>
+          {/each}
+          <button type="button" onclick={() => act((m) => (paletteFor = m))} aria-label="絵文字を選んでリアクション"><Icon name="add" size={20} /></button>
+        </div>
+        {#if reacted}<button type="button" role="menuitem" onclick={() => act((m) => void actions.unreact(m))}>リアクションを取り消す</button>{/if}
         <button type="button" role="menuitem" onclick={() => act((m) => (replyTo = m))}>返信</button>
         <button type="button" role="menuitem" onclick={() => act((m) => composer.show("quote", m))}>引用してタイムラインに投稿</button>
       {/if}
@@ -257,12 +292,84 @@
   </div>
 {/if}
 
+{#if paletteFor}
+  {@const target = paletteFor}
+  <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+  <div class="sheet-back" onclick={() => (paletteFor = null)}>
+    <div class="palette" onclick={(event) => event.stopPropagation()}>
+      <EmojiPicker hiddenInput close={() => (paletteFor = null)} pick={(content, emoji) => { paletteFor = null; void actions.react(target, content, emoji); }} />
+    </div>
+  </div>
+{/if}
+
 {#if reporting}
   {@const target = reporting}
   {#await import("./ReportDialog.svelte") then { default: ReportDialog }}<ReportDialog target={{ note: target, pubkey: target.pubkey }} close={() => (reporting = null)} />{/await}
 {/if}
 
 <style>
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    align-self: flex-start;
+    margin-top: 2px;
+    padding: 1px 8px;
+    font: inherit;
+    font-size: 0.8em;
+    color: var(--text);
+    background: var(--surface-low);
+    border: none;
+    border-radius: 12px;
+    cursor: pointer;
+  }
+  .mine .badge {
+    align-self: flex-end;
+  }
+  .badge.mine {
+    background: var(--secondary-container);
+  }
+  .badge img,
+  .quick img {
+    height: 1.2em;
+  }
+  .badge span {
+    color: var(--muted);
+  }
+  .quick {
+    display: flex;
+    gap: 4px;
+    padding: 4px 12px 8px;
+    overflow-x: auto;
+  }
+  .quick button {
+    display: grid;
+    flex: none;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    font-size: 20px;
+    color: var(--text);
+    background: var(--surface-low);
+    border: none;
+    border-radius: 50%;
+    cursor: pointer;
+  }
+  .quick button.chosen {
+    background: var(--secondary-container);
+  }
+  .palette {
+    position: absolute;
+    left: 50%;
+    bottom: 0;
+    width: min(100%, 420px);
+    transform: translateX(-50%);
+  }
+  .palette :global(.picker) {
+    position: static;
+    width: 100%;
+  }
   .danger {
     color: #c33 !important;
   }

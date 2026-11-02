@@ -1,8 +1,10 @@
 <script lang="ts">
+  import { PEUSA_PARTY } from "../store/peusa.svelte";
+  import { settings } from "../store/settings.svelte";
   import { tick } from "svelte";
   import { nip19 } from "nostr-tools";
   import { insertAt } from "../domain/emojiData";
-  import { DUMPLING, encodeHidden, MAX_HIDDEN_BYTES, mightHide, splitHidden } from "../domain/hiddenMessages";
+  import { BUNNY, encodeHidden, MAX_HIDDEN_BYTES, mightHide, splitHidden } from "../domain/hiddenMessages";
   import { insertMention, mentionCandidates, mentionQuery, type MentionPerson, type MentionQuery } from "../domain/mentions";
   import { EXPIRATION_CHOICES, expirationLabel } from "../domain/publishing";
   import { eventsOf, pool } from "../nostr/pool";
@@ -11,6 +13,8 @@
   import EmojiPicker from "./EmojiPicker.svelte";
   import { composer } from "../store/composer.svelte";
   import { deck } from "../store/deck.svelte";
+  import { home } from "../store/home.svelte";
+  import { flowSummary } from "../store/topics.svelte";
   import { viewer } from "../store/viewer.svelte";
   import { TEST_RELAY } from "../nostr/testMode";
   import Avatar from "./Avatar.svelte";
@@ -25,19 +29,29 @@
   const label = $derived(composer.mode === "reply" ? "返信" : composer.mode === "quote" ? "引用" : "投稿");
   let field = $state<HTMLTextAreaElement>();
   let picker = $state<HTMLInputElement>();
+  // 絵文字を 1 つ選んだら閉じる（開いたままだと本文が隠れて入ったのが見えず、何度も押してしまうという意見から。リアクションと同じ）
   let emojiOpen = $state(false);
   let expiryOpen = $state(false);
   let hiddenOpen = $state(false);
   let draftsOpen = $state(false);
   let posterOpen = $state(false);
-  let hiddenVisible = $state(DUMPLING);
+  let hiddenVisible = $state(BUNNY);
   let hiddenMessage = $state("");
   const hiddenBytes = $derived(new TextEncoder().encode(hiddenMessage).length);
 
   /** 隠しメッセージを入れる（Android 版の HiddenMessageDialog）。見える文字は空白だけにはできない。 */
+  /** 隠しメッセージの欄を開く。見える文字が🐇か :party_pe: のままなら、いまのモードのほうにする。 */
+  function toggleHidden() {
+    hiddenOpen = !hiddenOpen;
+    const party = `:${PEUSA_PARTY.shortcode}:`;
+    if (hiddenOpen && (hiddenVisible === BUNNY || hiddenVisible === party)) hiddenVisible = settings.peusaMode ? party : BUNNY;
+  }
+
   async function insertHidden() {
     if (!hiddenVisible.trim() || !hiddenMessage || hiddenBytes > MAX_HIDDEN_BYTES) return;
     hiddenOpen = false;
+    // スーパーぺぇうさモードの :party_pe: は、パレットから選んだ絵文字と同じく emoji タグを付ける
+    if (hiddenVisible.includes(`:${PEUSA_PARTY.shortcode}:`)) composer.rememberEmoji(PEUSA_PARTY);
     await insertEmoji(encodeHidden(hiddenVisible, hiddenMessage));
     hiddenMessage = "";
   }
@@ -239,7 +253,7 @@
     {#if mentioned.length > 0}
       <p class="note">メンション: {mentioned.map((pubkey) => `@${displayName(pubkey)}`).join("、")}</p>
     {/if}
-    {#if hiddenCount > 0}<p class="note">{DUMPLING} 隠しメッセージが{hiddenCount}件入っています（入力欄では見えません）</p>{/if}
+    {#if hiddenCount > 0}<p class="note">{BUNNY} 隠しメッセージが{hiddenCount}件入っています（入力欄では見えません）</p>{/if}
     {#if composer.expiresAfter}
       <p class="note">この投稿は{expirationLabel(composer.expiresAfter)}で消えるよう依頼します（対応していないリレーやアプリには残ることがあります）</p>
     {/if}
@@ -262,9 +276,20 @@
       </div>
     {/if}
     {#if draftsOpen}
-      <div class="drafts" role="group" aria-label="リレーの下書き">
+      <div class="drafts" role="group" aria-label="保存した下書き">
+        <strong>このブラウザ</strong>
+        {#each composer.localDrafts() as draft (draft.mode + (draft.target ?? ""))}
+          <div class="draft" class:current={composer.mode === draft.mode && (composer.target?.id ?? null) === draft.target}>
+            <button type="button" class="draft-open" onclick={() => { draftsOpen = false; void composer.openLocalDraft(draft); }}>
+              <span>{draft.text.slice(0, 80)}</span>
+              <small>{draft.mode === "reply" ? "返信" : draft.mode === "quote" ? "引用" : "通常投稿"}</small>
+            </button>
+          </div>
+        {:else}
+          <p class="hint">下書きはありません</p>
+        {/each}
         <div class="drafts-head">
-          <strong>リレーの下書き（NIP-37）</strong>
+          <strong>リレー（ほかの端末・アプリと共有、NIP-37）</strong>
           <button type="button" class="text" disabled={composer.remoteBusy || !composer.text.trim()} onclick={() => void composer.saveToRelays()}>今の内容を保存</button>
         </div>
         <p class="hint">暗号化して保存し、あなただけが読めます。90 日たつと消えます。</p>
@@ -307,7 +332,7 @@
       <input bind:this={picker} type="file" accept="image/*,video/*" multiple hidden onchange={(event) => { const files = event.currentTarget.files; if (files) void composer.attach(files); event.currentTarget.value = ""; }} />
       <span class="emoji-anchor">
         <button type="button" class="icon attach-emoji" class:active={emojiOpen} onclick={() => (emojiOpen = !emojiOpen)} aria-label="絵文字を入れる" aria-expanded={emojiOpen} title="絵文字を入れる"><Icon name="insertEmoticon" size={20} /></button>
-        {#if emojiOpen}<EmojiPicker placement="above" title="絵文字を入れる" close={() => (emojiOpen = false)} pick={(content, emoji) => void insertEmoji(content, emoji)} />{/if}
+        {#if emojiOpen && !docked}<EmojiPicker placement="above" title="絵文字を入れる" close={() => (emojiOpen = false)} pick={(content, emoji) => { emojiOpen = false; void insertEmoji(content, emoji); }} />{/if}
       </span>
       <button type="button" class="icon tool" class:warned={composer.contentWarning !== null} onclick={() => composer.setContentWarning(composer.contentWarning === null ? "センシティブな内容" : null)} aria-pressed={composer.contentWarning !== null} aria-label="センシティブな内容として投稿する" title="センシティブな内容として投稿する（注意書き）"><Icon name={composer.contentWarning !== null ? "visibilityOff" : "visibility"} size={20} /></button>
       <span class="menu-anchor">
@@ -321,8 +346,10 @@
           </span>
         {/if}
       </span>
+      <!-- 直前の流れ（ホームのいまのタブ）。話に入る前に見る -->
+      {#if settings.topicTools}<button type="button" class="icon tool" onclick={() => flowSummary.show(home.tab)} aria-label="直前の流れ" title="直前の流れ"><Icon name="forum" size={20} /></button>{/if}
       {#if viewer.canSign}<button type="button" class="icon tool" class:on={draftsOpen} onclick={() => { draftsOpen = !draftsOpen; if (draftsOpen && composer.remoteDrafts === null) void composer.loadDrafts(); }} aria-expanded={draftsOpen} aria-label="下書き一覧" title="リレーの下書き"><Icon name="listAlt" size={20} /></button>{/if}
-      <button type="button" class="icon tool dumpling" class:on={hiddenOpen} onclick={() => (hiddenOpen = !hiddenOpen)} aria-label="隠しメッセージを入れる" title="隠しメッセージを入れる">{DUMPLING}</button>
+      <button type="button" class="icon tool dumpling" class:on={hiddenOpen} onclick={toggleHidden} aria-label="隠しメッセージを入れる" title="隠しメッセージを入れる">{#if settings.peusaMode}<img src={PEUSA_PARTY.url} alt="" width="20" height="20" />{:else}{BUNNY}{/if}</button>
       <button type="button" class="icon attach" onclick={() => picker?.click()} disabled={composer.attachments.length + composer.uploading >= 4} aria-label="画像・動画を付ける" title="画像・動画を付ける（貼り付け・ドラッグでも）"><Icon name="addPhoto" size={20} /></button>
       <span class="count" class:over={composer.remaining < 0}>{composer.remaining.toLocaleString("en-US")}</span>
       {#if docked}
@@ -330,6 +357,8 @@
       {/if}
       <button type="button" class="icon tool" onclick={() => { composer.hide(); if (docked) deck.setPinComposer(false); }} aria-label="投稿欄をたたむ" title="投稿欄をたたむ"><Icon name="expandMore" size={22} /></button>
     </div>
+    <!-- カラム表示の左の投稿欄では、絵文字は道具の並びの下に、欄の幅で出す -->
+    {#if emojiOpen && docked}<EmojiPicker placement="inline" title="絵文字を入れる" close={() => (emojiOpen = false)} pick={(content, emoji) => { emojiOpen = false; void insertEmoji(content, emoji); }} />{/if}
   </div>
 {:else}
   <button type="button" class="fab" onclick={() => composer.show()} aria-label="投稿する" title="投稿する"><Icon name="edit" /></button>

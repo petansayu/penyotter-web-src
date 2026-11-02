@@ -6,6 +6,5 @@ interface ImportMetaEnv {
   readonly VITE_TEST_BLOSSOM?: string;
 }
 
-/** アプリの版（package.json の version）と、ビルドした日（vite.config.ts の define）。 */
+/** 画面に出す版。ビルドした日（日本時間）とコミット（vite.config.ts の buildVersion）。 */
 declare const __APP_VERSION__: string;
-declare const __BUILD_DATE__: string;

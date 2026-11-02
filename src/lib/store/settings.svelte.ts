@@ -1,5 +1,6 @@
-import { applyTheme, THEMES, type Mode, type Theme } from "../ui/themes";
+import { applyTheme, PEUSA_THEME, THEMES, type Mode, type Theme } from "../ui/themes";
 import { readSavedThemes, themeOf, writeSavedThemes, type SavedTheme } from "../ui/customTheme";
+import { parseSetAddress, type CustomEmoji } from "../domain/emojis";
 
 /**
  * 見た目などの設定。ブラウザごとに保存する（Android 版の「見た目」の端末ごとの設定 AppearanceSettings と同じ項目と
@@ -15,7 +16,7 @@ export type TextScale = (typeof TEXT_SCALES)[number];
 /** ♡ボタンで送る 1 タップリアクション（Android 版の ReactionChoice）。content は「+」・絵文字・`:名前:`。 */
 export interface OneTap {
   content: string;
-  emoji?: { shortcode: string; url: string };
+  emoji?: CustomEmoji;
 }
 
 interface Saved {
@@ -36,8 +37,17 @@ interface Saved {
   revealSensitive: boolean;
   autoEmbeds: boolean;
   profileInPager: boolean;
+  hideMuted: boolean;
+  readMarker: boolean;
+  topicTools: boolean;
+  peusaUnlocked: boolean;
+  peusaMode: boolean;
+  peusaLevel: PeusaLevel;
   oneTap: OneTap;
 }
+
+/** スーパーぺぇうさモードの強さ。 */
+export type PeusaLevel = "weak" | "medium" | "strong";
 
 const DEFAULTS: Saved = {
   theme: "sky",
@@ -57,6 +67,12 @@ const DEFAULTS: Saved = {
   revealSensitive: false,
   autoEmbeds: false,
   profileInPager: false,
+  hideMuted: false,
+  readMarker: true,
+  topicTools: true,
+  peusaUnlocked: false,
+  peusaMode: false,
+  peusaLevel: "medium",
   oneTap: { content: "+" },
 };
 
@@ -68,7 +84,7 @@ function readOneTap(raw: unknown): OneTap {
   const emoji = value.emoji as Record<string, unknown> | undefined;
   if (/^:[A-Za-z0-9_-]+:$/.test(content)) {
     const shortcode = content.slice(1, -1);
-    if (emoji && emoji.shortcode === shortcode && typeof emoji.url === "string" && emoji.url.startsWith("https://")) return { content, emoji: { shortcode, url: emoji.url } };
+    if (emoji && emoji.shortcode === shortcode && typeof emoji.url === "string" && emoji.url.startsWith("https://")) return { content, emoji: { shortcode, url: emoji.url, ...(typeof emoji.set === "string" && parseSetAddress(emoji.set) ? { set: emoji.set } : {}) } };
     return DEFAULTS.oneTap;
   }
   return { content };
@@ -96,6 +112,12 @@ function read(): Saved {
       revealSensitive: flag("revealSensitive"),
       autoEmbeds: flag("autoEmbeds"),
       profileInPager: flag("profileInPager"),
+      hideMuted: flag("hideMuted"),
+      readMarker: flag("readMarker"),
+      topicTools: flag("topicTools"),
+      peusaUnlocked: flag("peusaUnlocked"),
+      peusaMode: flag("peusaMode"),
+      peusaLevel: saved.peusaLevel === "weak" || saved.peusaLevel === "strong" ? saved.peusaLevel : "medium",
       oneTap: readOneTap(saved.oneTap),
     };
   } catch {
@@ -134,6 +156,20 @@ class Settings {
   autoEmbeds = $state(false);
   /** 自分のプロフィールを左右のスワイプに入れる（Android 版の profileInPager、最初はオフ）。 */
   profileInPager = $state(false);
+  /**
+   * ミュートした人・投稿を、引用カード・返信元・投稿の詳細の返信元でも完全に隠す（Android 版の hideMuted）。最初は
+   * オフで、「ミュートしているユーザーの投稿」の札を置く。タイムライン・通知・検索・返信一覧ではどちらでも隠す。
+   */
+  hideMuted = $state(false);
+  /** ホームの「ここまで読みました」の線と「前回の続きから」（Android 版の readMarker）。 */
+  readMarker = $state(true);
+  /** 話題を追う道具（いまの話題・直前の流れ・たぶんこの流れ。Android 版の topicTools）。 */
+  topicTools = $state(true);
+  /** スーパーぺぇうさモード（「このアプリについて」のアイコンを 5 回押すと見つかる。Android 版と同じ）。 */
+  peusaUnlocked = $state(false);
+  peusaMode = $state(false);
+  /** スーパーぺぇうさモードの強さ（弱：アイコンはそのまま、中：みんなのアイコン、強：アプリのアイコンも。Android 版の peusaLevel）。 */
+  peusaLevel = $state<PeusaLevel>("medium");
   oneTap = $state<OneTap>(DEFAULTS.oneTap);
   /** じぶんで作ったカラーテーマ（このブラウザに保存）。 */
   savedThemes = $state<SavedTheme[]>(readSavedThemes());
@@ -184,6 +220,12 @@ class Settings {
       revealSensitive: this.revealSensitive,
       autoEmbeds: this.autoEmbeds,
       profileInPager: this.profileInPager,
+      hideMuted: this.hideMuted,
+      readMarker: this.readMarker,
+      topicTools: this.topicTools,
+      peusaUnlocked: this.peusaUnlocked,
+      peusaMode: this.peusaMode,
+      peusaLevel: this.peusaLevel,
       oneTap: this.oneTap,
     };
   }
@@ -191,7 +233,7 @@ class Settings {
   /** 変わるたびにテーマと文字の大きさを当て直して保存する。App から $effect で呼ぶ。 */
   apply() {
     const saved = this.snapshot();
-    applyTheme(this.currentTheme, this.dark);
+    applyTheme(this.peusaMode ? PEUSA_THEME : this.currentTheme, this.dark);
     document.documentElement.style.fontSize = `${15 * this.textScale}px`;
     document.documentElement.classList.toggle("compact-posts", this.compactPosts);
     try {

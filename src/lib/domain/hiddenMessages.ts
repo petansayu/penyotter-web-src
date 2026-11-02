@@ -88,8 +88,8 @@ export function visibleText(text: string): string {
   return splitHidden(text).map((piece) => (piece.type === "text" ? piece.text : piece.visible)).join("");
 }
 
-/** 投稿欄で 1 タップで入れる見える文字。 */
-export const DUMPLING = "🥟";
+/** 投稿欄で 1 タップで入れる見える文字（スーパーぺぇうさモードのときは :party_pe:）。 */
+export const BUNNY = "🐇";
 /** 投稿欄で隠せるメッセージの長さ（UTF-8 のバイト数。1 バイトが本文の 2 文字になる）。 */
 export const MAX_HIDDEN_BYTES = 2000;
 

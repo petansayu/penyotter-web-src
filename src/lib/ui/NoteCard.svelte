@@ -9,7 +9,9 @@
   import { emojisOf, mediaOf, quoteCards, withoutMedia, withoutQuoteLink } from "../domain/content";
   import { address, parent } from "../domain/threads";
   import { isHex64, tagValue, type Event } from "../nostr/events";
-  import { profileHref, threadHref, writeHref } from "../router.svelte";
+  import { isEmptyCard, kindCard, kindLabel, kindLine } from "../domain/kindCards";
+  import { aroundHref, flowHref, profileHref, talkHref, threadHref, writeHref } from "../router.svelte";
+  import { home } from "../store/home.svelte";
   import { displayName, notes, profiles, requestNote } from "../store/cache.svelte";
   import { actions } from "../store/actions.svelte";
   import { composer } from "../store/composer.svelte";
@@ -19,6 +21,7 @@
   import { requestStatuses, statuses } from "../store/statuses.svelte";
   import { toast } from "../store/toast.svelte";
   import { viewer } from "../store/viewer.svelte";
+  import { isMuted, mutedLabel } from "../store/mutes";
   import Avatar from "./Avatar.svelte";
   import { clock } from "./clock.svelte";
   import Content from "./Content.svelte";
@@ -32,6 +35,7 @@
   import { useNavigate } from "./navigation";
   import { plainTap } from "./tap";
   import { fullTime, postTime } from "./time";
+  import PackEmoji from "./PackEmoji.svelte";
 
   /**
    * 投稿 1 件（Android 版の NoteCell と PostActions）。nested は引用カードの中（引用カードをさらに入れない）。
@@ -68,9 +72,11 @@
   const proxy = $derived(proxyOrigin(note));
   /** 本文のリンクの埋め込み（YouTube・X など、2 件まで。引用カードの中では出さない）。 */
   const embeds = $derived(nested ? [] : embedsIn(body));
-  const long = $derived(isLongBody(visibleText(body)));
+  // 長い本文は 8 行でたたむ。投稿の詳細で選んだ投稿は、開いたときから全部出す（「長い投稿が全部表示されない」という意見から）
+  const long = $derived(!selected && isLongBody(visibleText(body)));
   const parentId = $derived(parent(note));
   const parentNote = $derived(parentId ? notes.get(parentId) : undefined);
+  const parentWarning = $derived(parentNote ? contentWarning(parentNote) : null);
   /** 返信先として名前を出す人（作者以外の最初の p。引用カードの中だけ）。 */
   const replyTo = $derived.by(() => {
     if (parentId === null) return null;
@@ -183,6 +189,12 @@
     const label = compact(value);
     return label && count && !count.complete ? `≥${label}` : label;
   };
+
+  /** 名前。ペットネーム（フォロー一覧の p タグの 4 つ目）を付けた人は「📛ペットネーム」（Android 版の NoteCell と同じ）。 */
+  const nameOf = (pubkey: string) => {
+    const petname = viewer.petnames.get(pubkey);
+    return petname ? `📛${petname}` : displayName(pubkey);
+  };
 </script>
 
 {#snippet moreMenu()}
@@ -195,6 +207,15 @@
           <button type="button" role="menuitem" class="danger" onclick={() => { moreOpen = false; confirming = false; void actions.deletePost(note); }}>削除する</button>
           <button type="button" role="menuitem" onclick={() => (confirming = false)}>やめる</button>
         {:else}
+          <!-- 前後の投稿（Android 版と同じ）。リポストで出ているときは、リポストした人のその後も -->
+          <button type="button" role="menuitem" onclick={() => { moreOpen = false; navigate(aroundHref(note.id, "following", note.pubkey)); }}>この時点のタイムライン</button>
+          {#if repost}<button type="button" role="menuitem" onclick={() => { moreOpen = false; navigate(aroundHref(repost.id, "author", repost.pubkey)); }}>リポストした人のその後</button>{/if}
+          <!-- たぶんこの流れ（同じ話題らしい前後の投稿。Android 版と同じ） -->
+          {#if note.kind === 1 && settings.topicTools}<button type="button" role="menuitem" onclick={() => { moreOpen = false; navigate(flowHref(note.id, note.pubkey, home.tab)); }}>たぶんこの流れ</button>{/if}
+          <!-- 返信なら、返信した人と返信先の人の 2 人のやり取りだけ（Android 版と同じ） -->
+          {#if replyTo && replyTo !== note.pubkey}<button type="button" role="menuitem" onclick={() => { moreOpen = false; navigate(talkHref(note.pubkey, replyTo)); }}>この 2 人の会話</button>{/if}
+          <!-- ブロードキャスト: 署名済みのまま自分の書き込みリレーへ（ほかの人の投稿も。Android 版と同じ） -->
+          {#if viewer.pubkey}<button type="button" role="menuitem" onclick={() => { moreOpen = false; void actions.broadcast(note); }}>ブロードキャスト（書き込みリレーへ送る）</button>{/if}
           <button type="button" role="menuitem" onclick={() => { moreOpen = false; jsonDialog?.showModal(); }}>イベントJSONを確認</button>
           <button type="button" role="menuitem" onclick={() => copy(`nostr:${href.replace("#/e/", "")}`, "投稿ID")}>IDをコピー</button>
           <button type="button" role="menuitem" onclick={() => copy(note.id, "イベントID")}>イベントID（16進）をコピー</button>
@@ -286,7 +307,7 @@
     {#if title}<div class="title">{title}</div>{/if}
     {#if subject}<div class="title">{subject}</div>{/if}
     {#if body}
-      <div class="body" class:clamped={long && !expanded}><Content text={body} {emojis} hidden /></div>
+      <div class="body" class:clamped={long && !expanded}><Content text={body} {emojis} hidden emojiFrom={{ tags: note.tags, owner: note.pubkey }} /></div>
       {#if long}<button type="button" class="expand" onclick={() => (expanded = !expanded)}>{expanded ? "折りたたむ" : "続きを読む"}</button>{/if}
     {/if}
     {#if poll}<PollView {poll} />{/if}
@@ -299,14 +320,30 @@
       {:else}<span class="proxy"><Icon name="public" size={13} />{proxy.label} からの投稿</span>{/if}
     {/if}
   {:else}
-    <p class="muted">{tagValue(note, "alt") ?? `表示できない種類の投稿です（kind ${note.kind}）`}</p>
+    <!-- このアプリが描かない種類: タグから読めるものをカードに（Android 版の KindCardView） -->
+    {@const card = kindCard(note.kind, note.tags, note.content)}
+    {#if isEmptyCard(card)}
+      <p class="muted">{kindLine(card)}</p>
+    {:else}
+      <div class="article kind-card" data-testid="kind-card">
+        {#if settings.showImages && card.image}<img src={card.image} alt="" loading="lazy" referrerpolicy="no-referrer" />{/if}
+        {#if card.title}<strong>{card.title}</strong>{/if}
+        {#if card.summary}<span class="summary">{card.summary}</span>{/if}
+        {#if !card.title && card.alt}<span>{card.alt}</span>{/if}
+        {#each card.links as link (link)}<a class="kind-link" href={link} target="_blank" rel="noopener noreferrer nofollow">{new URL(link).host}</a>{/each}
+        <small>{kindLabel(card)}</small>
+      </div>
+    {/if}
   {/if}
 {/snippet}
 
 <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
 <article class:nested class:selected class:tappable={!selected} bind:this={element} onclick={tapCard}>
   {#if repost}
-    <a class="repost" href={profileHref(repost.pubkey)}><Icon name="repeat" size={16} />{displayName(repost.pubkey)} がリポスト</a>
+    <div class="repost-row">
+      <a class="repost" href={profileHref(repost.pubkey)}><Icon name="repeat" size={16} />{nameOf(repost.pubkey)} がリポスト</a>
+      <a class="repost-after" href={aroundHref(repost.id, "author", repost.pubkey)} title="リポストした人のその後">その後</a>
+    </div>
   {/if}
   {#if reaction}
     {@const reacted = reactionDisplay(reaction)}
@@ -315,9 +352,9 @@
         <HiddenMessage visible={reacted.type === "text" ? reacted.text : reacted.type === "image" ? `:${reacted.shortcode}:` : "❤️"} message={reacted.hidden} dialog>
           {#if reacted.type === "image"}<img class="reaction" src={reacted.url} alt=":{reacted.shortcode}:" referrerpolicy="no-referrer" />{:else if reacted.type === "text"}<span class="reaction">{reacted.text}</span>{:else}<Icon name="favorite" size={16} />{/if}
         </HiddenMessage>
-      {:else if reacted.type === "image"}<img class="reaction" src={reacted.url} alt=":{reacted.shortcode}:" referrerpolicy="no-referrer" />
+      {:else if reacted.type === "image"}<PackEmoji class="reaction" shortcode={reacted.shortcode} url={reacted.url} tags={reaction.tags} owner={reaction.pubkey} />
       {:else if reacted.type === "text"}<span class="reaction">{reacted.text}</span>
-      {:else}<Icon name="favorite" size={16} />{/if}{displayName(reaction.pubkey)} がリアクション
+      {:else}<Icon name="favorite" size={16} />{/if}{nameOf(reaction.pubkey)} がリアクション
     </a>
   {/if}
   {#if deleted}
@@ -330,12 +367,12 @@
   {#if !deleted || shown}
   <div class="row">
     {#if !nested && settings.showAvatars}
-      <a class="avatar" href={profileHref(note.pubkey)} aria-label={displayName(note.pubkey)}><Avatar pubkey={note.pubkey} /></a>
+      <a class="avatar" href={profileHref(note.pubkey)} aria-label={nameOf(note.pubkey)}><Avatar pubkey={note.pubkey} /></a>
     {/if}
     <div class="main">
       <header>
         {#if nested && settings.showAvatars}<Avatar pubkey={note.pubkey} size={20} />{/if}
-        <a class="name" href={profileHref(note.pubkey)}>{displayName(note.pubkey)}</a>
+        <a class="name" href={profileHref(note.pubkey)} data-profile-hover={note.pubkey}>{nameOf(note.pubkey)}</a>
         {#if username && !nested}<span class="username">@{username}</span>{/if}
         <span class="spacer"></span>
         {#if client}<span class="client" title="投稿元のクライアント">{client}</span>{/if}
@@ -344,11 +381,15 @@
       {#if status}
         <div class="status"><span class="mark">{status.type === "music" ? "♫" : "●"}</span><span class="text">{status.content}</span></div>
       {/if}
-      {#if parentId && !nested}
+      {#if parentId && !nested && parentNote && isMuted(parentNote)}
+        <!-- 返信元がミュートしている投稿なら、名前と本文を出さない（設定で「完全に隠す」なら行ごと出さない） -->
+        {#if !settings.hideMuted}<div class="parent"><Icon name="reply" size={15} /><span class="parent-text"><span>{mutedLabel(parentNote)}への返信</span></span></div>{/if}
+      {:else if parentId && !nested}
         {#if parentNote}
           <a class="parent" href={threadHref(parentNote.id, parentNote.pubkey)}>
             <Icon name="reply" size={15} />
-            <span class="parent-text"><strong>{displayName(parentNote.pubkey)}</strong><span>{visibleText(withoutMedia(parentNote.content, mediaOf(parentNote))).trim() || "メディア投稿"}</span></span>
+            <!-- 返信元がセンシティブ（NIP-36）なら中身は出さない（開くといつもの「表示する」） -->
+            <span class="parent-text"><strong>{nameOf(parentNote.pubkey)}</strong><span>{parentWarning && !settings.revealSensitive ? `センシティブな内容（${parentWarning}）` : visibleText(withoutMedia(parentNote.content, mediaOf(parentNote))).trim() || "メディア投稿"}</span></span>
           </a>
         {:else}
           <div class="parent">
@@ -357,8 +398,10 @@
             {#if parentState === "missing"}<button type="button" class="retry" onclick={retryParent}>再試行</button>{/if}
           </div>
         {/if}
+      {:else if replyTo && viewer.mutedPubkeys.has(replyTo)}
+        {#if !settings.hideMuted}<div class="reply-to"><Icon name="reply" size={15} />ミュートしているユーザーへの返信</div>{/if}
       {:else if replyTo}
-        <div class="reply-to"><Icon name="reply" size={15} /><a href={profileHref(replyTo)}>@{displayName(replyTo)}</a> への返信</div>
+        <div class="reply-to"><Icon name="reply" size={15} /><a href={profileHref(replyTo)}>@{nameOf(replyTo)}</a> への返信</div>
       {/if}
 
       {#if warning && !revealed && !settings.revealSensitive}
@@ -389,11 +432,14 @@
 </dialog>
 
 <style>
+  /* 返信・引用・リポスト・リアクション・絵文字は左に寄せて並べ、「…」は右端に置く（利用者の要望、2026-10-24） */
   .actions {
     display: flex;
     gap: 4px;
-    margin: 6px 0 -4px -6px;
-    max-width: 360px;
+    margin: 6px -6px -4px -6px;
+  }
+  .actions > .action {
+    flex: 0 1 72px;
   }
   .action {
     flex: 1;
@@ -426,7 +472,7 @@
   }
   .menu-anchor {
     position: relative;
-    flex: 1;
+    flex: 0 1 72px;
     display: flex;
   }
   .picker-anchor {
@@ -436,7 +482,8 @@
     font-size: 1.15em;
     line-height: 1;
   }
-  img.reaction {
+  img.reaction,
+  .repost :global(.pack-emoji img) {
     height: 18px;
     max-width: 36px;
     object-fit: contain;
@@ -482,6 +529,7 @@
     position: relative;
     flex: none;
     display: flex;
+    margin-left: auto;
   }
   .action.more {
     flex: none;
@@ -593,6 +641,20 @@
   .repost {
     padding-left: 28px;
   }
+  .repost-row {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+  }
+  .repost-row .repost {
+    min-width: 0;
+  }
+  .repost-after {
+    flex: none;
+    color: var(--primary);
+    font-size: 0.8em;
+    text-decoration: none;
+  }
   .reply-to a {
     color: var(--primary);
     text-decoration: none;
@@ -621,6 +683,19 @@
   .article span {
     color: var(--muted);
     font-size: 0.9em;
+  }
+  .kind-card .summary {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-line-clamp: 4;
+    line-clamp: 4;
+    -webkit-box-orient: vertical;
+    white-space: pre-wrap;
+  }
+  .kind-link {
+    font-size: 0.85em;
+    color: var(--primary);
+    text-decoration: none;
   }
   .article small {
     color: var(--secondary);

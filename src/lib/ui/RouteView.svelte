@@ -20,6 +20,16 @@
   <SearchPanel q={route.q} />
 {:else if route.name === "settings"}
   {#key route.page}{#await import("./Settings.svelte") then { default: Settings }}<Settings page={route.page} />{/await}{/key}
+{:else if route.name === "around"}
+  {#key `${route.id ?? route.at}:${route.scope}`}{#await import("./AroundView.svelte") then { default: AroundView }}<AroundView id={route.id} at={route.at} scope={route.scope} author={route.author} />{/await}{/key}
+{:else if route.name === "conversation"}
+  {#key `${route.a}:${route.b}`}{#await import("./ConversationView.svelte") then { default: ConversationView }}<ConversationView a={route.a} b={route.b} />{/await}{/key}
+{:else if route.name === "topic"}
+  {#key `${route.word}:${route.since}`}{#await import("./TopicView.svelte") then { default: TopicView }}<TopicView word={route.word} since={route.since} until={route.until} tab={route.tab} />{/await}{/key}
+{:else if route.name === "flow"}
+  {#key route.id}{#await import("./ProbableFlowView.svelte") then { default: ProbableFlowView }}<ProbableFlowView id={route.id} author={route.author} scope={route.scope} />{/await}{/key}
+{:else if route.name === "badges"}
+  {#await import("./BadgesPanel.svelte") then { default: BadgesPanel }}<BadgesPanel />{/await}
 {:else if route.name === "mutes"}
   {#await import("./MutesPanel.svelte") then { default: MutesPanel }}<MutesPanel />{/await}
 {:else if route.name === "history"}
