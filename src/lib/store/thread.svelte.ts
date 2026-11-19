@@ -1,6 +1,7 @@
 import { SvelteMap } from "svelte/reactivity";
 import { mentionedPubkeys } from "../domain/content";
-import { deletedBy, deletionKeys, reactionTarget } from "../domain/interactions";
+import { deletedBy, deletionKeys, INTERACTION_KINDS, interactionsByTarget, ownActions, reactionTarget } from "../domain/interactions";
+import { actions } from "./actions.svelte";
 import { chain, descendants, parent, reference } from "../domain/threads";
 import { isHex64, type Event, type Filter } from "../nostr/events";
 import { fetchFromAuthor, loadRelayLists, relayLists } from "../nostr/outbox";
@@ -26,7 +27,8 @@ export class Thread {
   /** リポスト（kind 6・16）。 */
   reposts = $state<Event[]>([]);
   /** リアクションへのリアクション（リアクションの ID ごと）。 */
-  readonly reactionReactions = new SvelteMap<string, Event[]>();
+  /** リアクション・リポストへのリアクション・リポスト（先の ID ごと）。 */
+  readonly nestedInteractions = new SvelteMap<string, Event[]>();
   /** リポストとリアクションを取り切れたか（できなければ数に「+」）。 */
   interactionsComplete = $state(false);
   /** 購読で届いた、まだ出していない返信。 */
@@ -87,28 +89,31 @@ export class Thread {
     });
   }
 
-  /** リポスト・リアクションと、その取り消し、リアクションへのリアクション（読み込みリレーと投稿が見つかったリレー）。 */
+  /**
+   * リポスト・リアクションと、その取り消し、それらへのリアクション・リポスト（読み込みリレーと投稿が見つかったリレー。
+   * Android 版の ThreadController と同じ）。
+   */
   private async loadInteractions(selected: Event) {
     const relays = relaySet([...viewer.readRelays, ...this.relays]);
     const id = selected.id;
     const first = await pool.fetch(relays, [{ kinds: [6, 7, 16], "#e": [id], limit: 500 }]);
     const events = eventsOf(first).filter((e) => (e.kind === 7 ? reactionTarget(e) === id : e.tags.some((t) => t[0] === "e" && t[1] === id)));
-    const reactionIds = events.filter((e) => e.kind === 7).map((e) => e.id);
+    const ids = events.map((e) => e.id).slice(0, 300);
     const second = events.length > 0
-      ? eventsOf(await pool.fetch(relays, [{ kinds: [5], "#e": events.map((e) => e.id) }, ...(reactionIds.length ? [{ kinds: [7], "#e": reactionIds }] : [])]))
+      ? eventsOf(await pool.fetch(relays, [{ kinds: [5], "#e": events.map((e) => e.id) }, { kinds: INTERACTION_KINDS, "#e": ids, limit: 500 }]))
       : [];
-    const nested = second.filter((e) => e.kind === 7 && reactionIds.includes(reactionTarget(e) ?? ""));
+    const idSet = new Set(ids);
+    const nested = second.filter((e) => e.kind !== 5 && interactionsByTarget([e], idSet, new Set()).size > 0);
     const third = nested.length > 0 ? eventsOf(await pool.fetch(relays, [{ kinds: [5], "#e": nested.map((e) => e.id) }])) : [];
     const keys = deletionKeys([...second, ...third]);
     const alive = (e: Event) => !deletedBy(keys, e);
     const byTime = (a: Event, b: Event) => a.created_at - b.created_at;
     this.reactions = events.filter((e) => e.kind === 7 && alive(e)).sort(byTime);
     this.reposts = events.filter((e) => e.kind !== 7 && alive(e)).sort(byTime);
-    this.reactionReactions.clear();
-    for (const reaction of nested.filter(alive).sort(byTime)) {
-      const target = reactionTarget(reaction)!;
-      this.reactionReactions.set(target, [...(this.reactionReactions.get(target) ?? []), reaction]);
-    }
+    this.nestedInteractions.clear();
+    for (const [target, found] of interactionsByTarget(nested, idSet, keys)) this.nestedInteractions.set(target, found);
+    // ほかの端末でした自分のリアクション・リポストも、メニューの「取り消す」に入れる
+    if (viewer.pubkey) actions.adopt(ownActions([...nested, ...third], viewer.pubkey), ids);
     this.interactionsComplete = first.complete;
     requestProfiles([...events, ...nested].map((e) => e.pubkey));
   }

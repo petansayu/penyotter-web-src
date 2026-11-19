@@ -4,6 +4,7 @@
   import { reactionHidden } from "../domain/hiddenMessages";
   import HiddenMessage from "./HiddenMessage.svelte";
   import { actionLines, formatSats, reactedTo, sats, type ActionLine, type NotificationGroup } from "../domain/notifications";
+  import { isInteraction } from "../domain/interactions";
   import type { Event } from "../nostr/events";
   import { profileHref, threadHref } from "../router.svelte";
   import { displayName, notes } from "../store/cache.svelte";
@@ -28,18 +29,20 @@
   const unread = $derived(group.events.some((event) => !notifications.read.has(event.id)));
   const lines = $derived(group.kind === "actions" || group.kind === "action" ? actionLines(group) : []);
   const target = $derived(group.target ? notes.get(group.target) : undefined);
-  const reacted = $derived(target?.kind === 7 ? reactedTo(target) : null);
+  // 自分のリアクション・リポストへの反応なら、その先の投稿も出す（Android 版の「あなたのリアクション」「あなたのリポスト」）
+  const reacted = $derived(target && isInteraction(target.kind) ? reactedTo(target) : null);
   const reactedPost = $derived(reacted ? notes.get(reacted.id) : undefined);
   const totalSats = $derived(lines.reduce((sum, line) => sum + (line.type === "zap" ? sats(line.receipt.msats) ?? 0 : 0), 0));
   const zapCount = $derived(lines.filter((line) => line.type === "zap").length);
   let expanded = $state(false);
   const shownLines = $derived(expanded || lines.length <= VISIBLE_LINES ? lines : lines.slice(0, VISIBLE_LINES));
   const label = $derived.by(() => {
-    if (group.kind === "reply") return "返信";
+    if (group.kind === "reply") return group.target ? "返信" : "メンション";
     if (group.kind === "quote") return "引用";
     if (!group.target) return "あなたのプロフィール";
     if (!target) return "対象の投稿";
     if (target.kind === 7) return "あなたのリアクション";
+    if (target.kind === 6 || target.kind === 16) return "あなたのリポスト";
     if (target.pubkey !== me) return "関連する投稿";
     return null;
   });
@@ -82,7 +85,7 @@
       note = (await fetchTarget(group.target, me)) ?? undefined;
       opening = false;
     }
-    if (note?.kind === 7) {
+    if (note && isInteraction(note.kind)) {
       const ref = reactedTo(note);
       const post = ref ? notes.get(ref.id) ?? (await fetchTarget(ref.id, ref.author ?? me)) : null;
       if (post) navigate(threadHref(post.id, post.pubkey));
@@ -94,7 +97,7 @@
   }
 </script>
 
-{#snippet head(icon: "reply" | "formatQuote" | "militaryTech" | null, text: string | null)}
+{#snippet head(icon: "reply" | "formatQuote" | "militaryTech" | "notificationsActive" | null, text: string | null)}
   <div class="label">
     <span class="dot" class:unread></span>
     {#if icon}<Icon name={icon} size={14} />{/if}
@@ -135,8 +138,8 @@
 
 <!-- 反応のまとめのカードは、どこを押しても対象の投稿を開く（Android 版の「対象の投稿を開く」）。返信・引用は中の投稿カードが開く -->
 <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-<div class="card" class:tappable={group.kind !== "reply" && group.kind !== "quote" && !!group.target} bind:this={element} data-unread={unread}
-  onclick={(event) => { if (group.kind !== "reply" && group.kind !== "quote" && group.target && plainTap(event)) void openTarget(); }}>
+<div class="card" class:tappable={group.kind !== "reply" && group.kind !== "quote" && group.kind !== "watch" && !!group.target} bind:this={element} data-unread={unread}
+  onclick={(event) => { if (group.kind !== "reply" && group.kind !== "quote" && group.kind !== "watch" && group.target && plainTap(event)) void openTarget(); }}>
   {#if group.kind === "badge"}
     <!-- もらったバッジ（NIP-58）。押すと自分のバッジの画面（Android 版の BadgeAwardCard） -->
     {@const award = group.events[0]}
@@ -155,13 +158,22 @@
   {:else if group.kind === "reply" || group.kind === "quote"}
     {@render head(group.kind === "quote" ? "formatQuote" : "reply", label)}
     <NoteCard note={group.events[0]} />
+  {:else if group.kind === "watch"}
+    <!-- 投稿のお知らせ: 選んだ人の新しい投稿そのもの（返信と同じ見せ方） -->
+    {@render head("notificationsActive", "投稿のお知らせ")}
+    <NoteCard note={group.events[0]} />
   {:else}
     {@render head(null, label)}
     {#each shownLines as item, i (i)}{@render line(item)}{/each}
     {#if lines.length > VISIBLE_LINES}
       <button type="button" class="more" onclick={() => (expanded = !expanded)}>{expanded ? "折りたたむ" : `ほか${lines.length - VISIBLE_LINES}件を表示`}</button>
     {/if}
-    {#if target?.kind === 7}
+    {#if target && (target.kind === 6 || target.kind === 16)}
+      <button type="button" class="summary" onclick={openTarget}>
+        <span class="chip"><Icon name="repeat" size={14} /></span>
+        <span class="body">{reactedPost ? summary(reactedPost) : "リポストした投稿は未取得です"}</span>
+      </button>
+    {:else if target?.kind === 7}
       <button type="button" class="summary" onclick={openTarget}>
         <span class="chip">{#if target.content.trim() === "+" || !target.content.trim()}<Icon name="favoriteBorder" size={14} />{:else if reactionHidden(target.content.trim())}{@const mine = reactionHidden(target.content.trim())!}<HiddenMessage visible={mine.visible} message={mine.message} dialog />{:else}{target.content}{/if}</span>
         <span class="body">{reactedPost ? summary(reactedPost) : "リアクションした投稿は未取得です"}</span>

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { peusaOn } from "../store/peusa.svelte";
   import { settings } from "../store/settings.svelte";
   import PeusaEmpty from "./PeusaEmpty.svelte";
   import { useNavigate } from "./navigation";
@@ -182,7 +183,7 @@
     {#each tab === "posts" ? notesOnly : tab === "articles" ? articles : search.results as note (note.id)}
       <div class="item"><NoteCard {note} /></div>
     {:else}
-      {#if settings.peusaMode && !search.loading}<PeusaEmpty picture="empty-search" message="見つかりませんでした" />{:else}<p class="note">{search.loading ? "探しています…" : "見つかりませんでした"}</p>{/if}
+      {#if peusaOn("placeholders") && !search.loading}<PeusaEmpty picture="empty-search" message="見つかりませんでした" />{:else}<p class="note">{search.loading ? "探しています…" : "見つかりませんでした"}</p>{/if}
     {/each}
     {#if search.results.length > 0 && !search.finished}
       <div class="footer"><button type="button" class="more" onclick={() => search?.more()} disabled={search.loading}>{search.loading ? "探しています…" : "さらに探す"}</button></div>
@@ -191,7 +192,7 @@
     {#each search.people as pubkey (pubkey)}
       {@render person(pubkey)}
     {:else}
-      {#if settings.peusaMode && !search.loading}<PeusaEmpty picture="empty-search" message="見つかりませんでした" />{:else}<p class="note">{search.loading ? "探しています…" : "見つかりませんでした"}</p>{/if}
+      {#if peusaOn("placeholders") && !search.loading}<PeusaEmpty picture="empty-search" message="見つかりませんでした" />{:else}<p class="note">{search.loading ? "探しています…" : "見つかりませんでした"}</p>{/if}
     {/each}
   {/if}
 {/if}

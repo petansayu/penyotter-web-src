@@ -1,7 +1,7 @@
 import { SvelteMap, SvelteSet } from "svelte/reactivity";
 import { verifyEvent } from "nostr-tools";
 import { broadcastRefusal } from "../domain/broadcast";
-import { addressee, buildDeletion, buildEvent, buildRepost, buildUndo } from "../domain/publishing";
+import { addressee, buildDeletion, buildEvent, buildRepost, buildUndo, deliveryPeople, relaysForPeople } from "../domain/publishing";
 import type { Event } from "../nostr/events";
 import { fetchFromAuthor, loadRelayLists, relayLists } from "../nostr/outbox";
 import { delay, eventsOf, publish, type PublishResult } from "../nostr/pool";
@@ -25,14 +25,15 @@ const key = (name: string, pubkey: string) => `${name}.${pubkey}`;
 
 /**
  * 送り先（技術資料 6.1）。書き込みリレーに加えて、相手の投稿なら、その作者の kind 10002 の読み込みリレー
- * （インボックス）へ 3 件まで（ゆるアウトボックス）。作者のリストは 4 秒まで探し、見つからなければ書き込みリレーだけ。
+ * （インボックス）へ 3 件まで（ゆるアウトボックス）。tags を渡すと、メンションした人（`p`）の読み込みリレーにも送る
+ * （NIP-65。5 人・合わせて 9 件まで、Android 版と同じ）。リストは 4 秒まで探し、見つからなければ書き込みリレーだけ。
  */
-export async function deliveryRelays(target: Event | undefined): Promise<string[]> {
+export async function deliveryRelays(target: Event | undefined, tags: string[][] = [], author = viewer.pubkey ?? ""): Promise<string[]> {
   const own = viewer.writeRelays;
-  if (!target || target.pubkey === viewer.pubkey) return own;
-  await Promise.race([loadRelayLists([target.pubkey], viewer.alwaysOn), delay(4000)]);
-  const inbox = relayLists.get(target.pubkey)?.list?.read.slice(0, 3) ?? [];
-  return relaySet([...own, ...inbox]);
+  const people = deliveryPeople(target?.pubkey ?? null, tags, author);
+  if (people.length === 0) return own;
+  await Promise.race([loadRelayLists(people, viewer.alwaysOn), delay(4000)]);
+  return relaySet(relaysForPeople(own, people.map((pubkey) => relayLists.get(pubkey)?.list?.read ?? [])));
 }
 
 class Actions {

@@ -27,6 +27,13 @@ interface SubHandlers {
   onEvent: (event: Event) => void;
   onEose?: () => void;
   onClosed?: (reason: string) => void;
+  /** 大きすぎて読まずに飛ばしたイベントがあった（その取得は完全とみなさない）。 */
+  onSkipped?: () => void;
+}
+
+/** 大きすぎるメッセージが EVENT なら、その購読の ID（先頭だけを見る）。 */
+export function skippedSubscription(data: string): string | null {
+  return /^\s*\[\s*"EVENT"\s*,\s*"([^"\\]{1,64})"/.exec(data.slice(0, 200))?.[1] ?? null;
 }
 
 let nextId = 0;
@@ -181,7 +188,7 @@ class RelayConnection {
     const authenticator = this.pool.authenticator;
     if (!challenge || !authenticator || this.authing || this.authed) return;
     this.authing = true;
-    authenticator(this.url, challenge).then((event) => {
+    authenticator(this.url, challenge, this.pending.size > 0).then((event) => {
       if (!event || !this.open || this.challenge !== challenge) {
         this.authing = false;
         return;
@@ -211,7 +218,10 @@ class RelayConnection {
   private receive(data: unknown) {
     if (typeof data !== "string") return;
     if (data.length > MAX_MESSAGE) {
-      this.ws?.close();
+      // 接続は切らずに、そのイベントだけ飛ばす（切るとつなぎ直したときにまた同じものが届き、繰り返していた。
+      // Android 版の RelayMessage.Skipped と同じ）
+      const id = skippedSubscription(data);
+      if (id) this.subs.get(id)?.onSkipped?.();
       return;
     }
     let message: unknown;
@@ -287,9 +297,10 @@ export class RelayPool {
   private readonly connections = new Map<string, RelayConnection>();
   /**
    * AUTH（NIP-42）に答える署名役。リレーの URL と challenge から kind 22242 の署名済みイベントを作る。null なら
-   * 答えない（見るだけのときと、設定でオフのとき）。
+   * 答えない（見るだけのときと、設定でオフのとき）。sending はそのリレーへ送っている最中のイベントがあるか
+   * （認証する相手を絞るため）。
    */
-  authenticator: ((url: string, challenge: string) => Promise<Event | null>) | null = null;
+  authenticator: ((url: string, challenge: string, sending: boolean) => Promise<Event | null>) | null = null;
   private readonly unavailable = new Map<string, number>();
 
   /** 接続の状況。使えないとみなしている間は unavailable。まだつないでいないものは closed。 */
@@ -337,6 +348,7 @@ export class RelayPool {
       const done = new Set<string>();
       const eosed = new Set<string>();
       const heard = new Set<string>();
+      const skipped = new Set<string>();
       const requests = new Map<string, { close: () => void; sent: () => boolean }>();
       let cutoff: ReturnType<typeof setTimeout> | undefined;
       let finished = false;
@@ -353,7 +365,7 @@ export class RelayPool {
         if (timedOut && limit >= ONE_SHOT_LIMIT) for (const url of targets) if (!heard.has(url) && !unsent.has(url)) this.markUnavailable(url);
         // 全部のリレーが終わったとき（断ったリレーがあっても）は、打ち切ったときと同じく半分以上の EOSE で足りる
         const complete = eosed.size === targets.length || ((cut || done.size === targets.length) && eosed.size * 2 >= targets.length);
-        resolve({ events, complete });
+        resolve({ events, complete: complete && skipped.size === 0 });
       };
       const overall = setTimeout(() => finish(false, true), limit);
       const settle = (url: string, eose: boolean) => {
@@ -378,6 +390,7 @@ export class RelayPool {
           },
           onEose: () => settle(url, true),
           onClosed: () => settle(url, false),
+          onSkipped: () => skipped.add(url),
         }));
       }
     });

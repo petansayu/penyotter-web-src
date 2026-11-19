@@ -1,6 +1,6 @@
 <script lang="ts">
   import { deck } from "../store/deck.svelte";
-  import { peusa, peusaClearRandom, peusaPicture, peusaStrong } from "../store/peusa.svelte";
+  import { peusa, peusaClearRandom, peusaOn, peusaPicture } from "../store/peusa.svelte";
   import { settings } from "../store/settings.svelte";
 
   /**
@@ -9,11 +9,12 @@
    * 強のあいだは、画面の下の端からぺぇうさがのぞき（ときどき入れ替わる）、押したところから水色のハートが飛び散る
    * （どちらも押せないので、下の操作はそのまま効く）。
    */
-  const strong = $derived(peusaStrong());
+  const peekOn = $derived(peusaOn("peek"));
+  const heartsOn = $derived(peusaOn("hearts"));
   let peek = $state(peusaClearRandom());
   let peeking = $state(false);
   $effect(() => {
-    if (!strong) return;
+    if (!peekOn) return;
     let timer = setTimeout(function cycle() {
       if (peeking) {
         peeking = false;
@@ -34,7 +35,7 @@
   let bursts = $state<{ id: number; x: number; y: number; turn: number }[]>([]);
   let nextBurst = 0;
   $effect(() => {
-    if (!strong) return;
+    if (!heartsOn) return;
     const tapped = (event: PointerEvent) => {
       const burst = { id: nextBurst++, x: event.clientX, y: event.clientY, turn: Math.random() * 360 };
       bursts = [...bursts.slice(-7), burst];
@@ -47,7 +48,7 @@
 
   $effect(() => {
     const current = peusa.celebration;
-    if (!current || !settings.peusaMode) return;
+    if (!current || !peusaOn("celebration")) return;
     shown = current.picture;
     const timer = setTimeout(() => (shown = null), 1500);
     return () => clearTimeout(timer);
@@ -60,8 +61,10 @@
   });
 </script>
 
-{#if strong}
+{#if peekOn}
   <img class="peek" class:deck={deck.active} class:up={peeking} src={peek} alt="" width="104" height="104" data-testid="peusa-peek" />
+{/if}
+{#if heartsOn}
   {#each bursts as burst (burst.id)}
     <div class="burst" style:left="{burst.x}px" style:top="{burst.y}px" aria-hidden="true">
       {#each Array.from({ length: HEARTS }, (_, i) => burst.turn + (i * 360) / HEARTS) as angle, i (i)}

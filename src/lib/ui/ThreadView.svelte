@@ -15,6 +15,7 @@
   import { quotesOf } from "../store/conversation.svelte";
   import { isMuted, mutedLabel } from "../store/mutes";
   import { settings } from "../store/settings.svelte";
+  import { openInteractionMenu } from "../store/interactionMenu.svelte";
 
   /** 投稿の詳細（技術資料 5.4）。返信元・選んだ投稿・返信（字下げ）を並べる。 */
   let { id, relays = [], author }: { id: string; relays?: string[]; author?: string } = $props();
@@ -28,19 +29,20 @@
   /** 反応を開いたリアクション。 */
   let openNested = $state(new Set<string>());
 
-  /** リアクションの見せ方（文字か画像）。 */
+  /** リアクションの見せ方（文字か画像）。リポストは 🔁。 */
   const label = (event: Event): { text: string; url?: string; hidden?: string } => {
+    if (event.kind !== 7) return { text: "🔁" };
     const shown = reactionDisplay(event);
     const base = shown.type === "like" ? { text: "+" } : shown.type === "image" ? { url: shown.url, text: `:${shown.shortcode}:` } : { text: shown.text };
     return { ...base, hidden: shown.hidden };
   };
 
-  /** リアクションへのリアクションを、絵文字ごとの数に（多い順）。 */
+  /** リアクション・リポストへのリアクション・リポストを、絵文字ごと（リポストは 🔁）の数に（多い順）。 */
   function countsOf(events: Event[]) {
     const groups = new Map<string, { event: Event; count: number }>();
     for (const event of events) {
       // 隠しメッセージ付きも、見える絵文字でまとめる
-      const key = reactionVisible(event.content.trim()) || "+";
+      const key = event.kind !== 7 ? "🔁" : reactionVisible(event.content.trim()) || "+";
       const group = groups.get(key);
       if (group) group.count++;
       else groups.set(key, { event, count: 1 });
@@ -92,6 +94,37 @@
   {:else if shown.url}<PackEmoji shortcode={shown.text.slice(1, -1)} url={shown.url} tags={event.tags} owner={event.pubkey} />{:else}{shown.text}{/if}
 {/snippet}
 
+{#snippet interaction(event: Event)}
+  <!-- リアクション・リポストの 1 行。それへのリアクション・リポストの数を右に出し、押すと字下げして並べる。
+       「…」でそれにリアクション・リポストするメニュー（Android 版の InteractionRow・InteractionMenu） -->
+  {@const shown = label(event)}
+  {@const nested = thread?.nestedInteractions.get(event.id) ?? []}
+  <li>
+    <a href={profileHref(event.pubkey)}><Avatar pubkey={event.pubkey} size={28} /><strong>{displayName(event.pubkey)}</strong></a>
+    <span class="emoji">{#if event.kind === 7}{@render emoji(shown, event)}{:else}リポスト{/if}</span>
+    {#if nested.length > 0}
+      <button type="button" class="chips" class:open={openNested.has(event.id)} onclick={() => toggleNested(event.id)} aria-label={openNested.has(event.id) ? "このリアクション・リポストへの反応をたたむ" : "このリアクション・リポストへの反応を見る"}>
+        {#each countsOf(nested).slice(0, 3) as group (group.event.id)}
+          {@const g = label(group.event)}
+          <span>{#if g.url}<img src={g.url} alt={g.text} referrerpolicy="no-referrer" />{:else}{g.text}{/if} {group.count}</span>
+        {/each}
+        {#if countsOf(nested).length > 3}…{/if}
+      </button>
+    {/if}
+    <button type="button" class="more" onclick={() => openInteractionMenu(event)} aria-label="{displayName(event.pubkey)} の{event.kind === 7 ? 'リアクション' : 'リポスト'}の操作" title="リアクション・リポストする"><Icon name="moreHoriz" size={18} /></button>
+  </li>
+  {#if openNested.has(event.id)}
+    {#each nested as inner (inner.id)}
+      {@const g = label(inner)}
+      <li class="inner">
+        <a href={profileHref(inner.pubkey)}><Avatar pubkey={inner.pubkey} size={22} /><strong>{displayName(inner.pubkey)}</strong></a>
+        <span class="emoji">{#if inner.kind === 7}{@render emoji(g, inner)}{:else}リポスト{/if}</span>
+        <button type="button" class="more" onclick={() => openInteractionMenu(inner)} aria-label="{displayName(inner.pubkey)} の{inner.kind === 7 ? 'リアクション' : 'リポスト'}の操作" title="リアクション・リポストする"><Icon name="moreHoriz" size={18} /></button>
+      </li>
+    {/each}
+  {/if}
+{/snippet}
+
 {#if thread}
   {#if thread.ancestors?.truncated}<p class="note">返信元をすべては表示していません</p>{/if}
   {#each thread.ancestors?.ancestors ?? [] as note (note.id)}
@@ -115,39 +148,12 @@
     </div>
     {#if reactionsOpen}
       <ul class="who">
-        {#each thread.reactions as reaction (reaction.id)}
-          {@const shown = label(reaction)}
-          {@const nested = thread.reactionReactions.get(reaction.id) ?? []}
-          <li>
-            <a href={profileHref(reaction.pubkey)}><Avatar pubkey={reaction.pubkey} size={28} /><strong>{displayName(reaction.pubkey)}</strong></a>
-            <span class="emoji">{@render emoji(shown, reaction)}</span>
-            {#if nested.length > 0}
-              <button type="button" class="chips" class:open={openNested.has(reaction.id)} onclick={() => toggleNested(reaction.id)} aria-label={openNested.has(reaction.id) ? "このリアクションへの反応をたたむ" : "このリアクションへの反応を見る"}>
-                {#each countsOf(nested).slice(0, 3) as group (group.event.id)}
-                  {@const g = label(group.event)}
-                  <span>{#if g.url}<img src={g.url} alt={g.text} referrerpolicy="no-referrer" />{:else}{g.text}{/if} {group.count}</span>
-                {/each}
-                {#if countsOf(nested).length > 3}…{/if}
-              </button>
-            {/if}
-          </li>
-          {#if openNested.has(reaction.id)}
-            {#each nested as inner (inner.id)}
-              {@const g = label(inner)}
-              <li class="inner">
-                <a href={profileHref(inner.pubkey)}><Avatar pubkey={inner.pubkey} size={22} /><strong>{displayName(inner.pubkey)}</strong></a>
-                <span class="emoji">{@render emoji(g, inner)}</span>
-              </li>
-            {/each}
-          {/if}
-        {/each}
+        {#each thread.reactions as reaction (reaction.id)}{@render interaction(reaction)}{/each}
       </ul>
     {/if}
     {#if repostsOpen}
       <ul class="who">
-        {#each thread.reposts as repost (repost.id)}
-          <li><a href={profileHref(repost.pubkey)}><Avatar pubkey={repost.pubkey} size={28} /><strong>{displayName(repost.pubkey)}</strong></a><span class="emoji">リポスト</span></li>
-        {/each}
+        {#each thread.reposts as repost (repost.id)}{@render interaction(repost)}{/each}
       </ul>
     {/if}
   {/if}
@@ -284,6 +290,21 @@
   }
   .chips.open {
     background: var(--secondary-container);
+  }
+  .more {
+    display: grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    color: var(--muted);
+    background: none;
+    border: none;
+    border-radius: 50%;
+    cursor: pointer;
+  }
+  .more:hover {
+    background: var(--surface-low);
   }
   .new-replies {
     margin: 6px 12px;

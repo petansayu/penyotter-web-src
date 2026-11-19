@@ -1,14 +1,16 @@
+import { mutedByWords } from "../domain/muteRules";
 import { root } from "../domain/threads";
 import type { Event } from "../nostr/events";
 import { viewer } from "./viewer.svelte";
 
 /**
- * ミュートしているか（Android 版の HomeModel の判定と同じ）。ミュートした人の投稿、ミュートした投稿、ミュートした
- * スレッド（根の投稿をミュート）の投稿。
+ * ミュートしているか（Android 版の MutedPosts.isMuted と同じ）。ミュートした人の投稿、ミュートした投稿、ミュートした
+ * スレッド（根の投稿をミュート）の投稿、ミュートした言葉・ハッシュタグを含む投稿。
  */
 export function isMuted(note: Event): boolean {
   const posts = viewer.mutedEvents;
-  return viewer.mutedPubkeys.has(note.pubkey) || posts.has(note.id) || posts.has(root(note));
+  return viewer.mutedPubkeys.has(note.pubkey) || posts.has(note.id) || posts.has(root(note)) ||
+    mutedByWords(note, { words: viewer.mutedWords, hashtags: viewer.mutedHashtags });
 }
 
 /** 札に出す言葉。人をミュートしたのか、投稿（スレッド）をミュートしたのか。 */

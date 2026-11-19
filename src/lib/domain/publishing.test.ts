@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { finalizeEvent, generateSecretKey, getPublicKey, nip19, type Event } from "nostr-tools";
 import { withHiddenReaction } from "./hiddenMessages";
-import { addressee, buildDeletion, buildEvent, buildRepost, buildUndo, CLIENT_TAG } from "./publishing";
+import { addressee, buildDeletion, buildEvent, buildMediaEvent, buildRepost, buildUndo, CLIENT_TAG, deliveryPeople, relaysForPeople } from "./publishing";
 import { publish } from "../nostr/pool";
 import { startTestRelay } from "../../../scripts/test-relay.mjs";
 
@@ -60,11 +60,39 @@ describe("buildEvent", () => {
   });
 });
 
-describe("注意書きと消える投稿", () => {
-  it("content-warning（200 文字まで）と expiration。付けなければどちらもない", () => {
-    const post = buildEvent(ME, { mode: "post", body: "ねたばれ", contentWarning: "x".repeat(250), expiresAfter: 3600 }, 1000, { clientTag: false });
+describe("Android 版の監査の修正（#130）に合わせたもの", () => {
+  it("画像・動画形式の投稿にも、注意書き・ハッシュタグ・メンション・引用・絵文字のタグを付ける", () => {
+    const media = [{ url: `https://x.test/${"d".repeat(64)}.jpg`, type: "image/jpeg", sha256: "d".repeat(64), size: 10, dim: "2x3" }];
+    const body = `海 #umi :pe: nostr:${nip19.npubEncode(OTHER)} nostr:${nip19.neventEncode({ id: POST, author: THIRD })}`;
+    const event = buildMediaEvent(ME, 20, { body, media, contentWarning: "ねたばれ", customEmojis: [{ shortcode: "pe", url: "https://x.test/pe.png" }] }, 100, { clientTag: true });
+    expect(event.kind).toBe(20);
+    expect(event.content).toBe(body);
+    expect(event.tags).toContainEqual(["title", body.slice(0, 80)]);
+    expect(event.tags.filter((t) => t[0] === "imeta")).toHaveLength(1);
+    for (const tag of [["t", "umi"], ["p", OTHER], ["q", POST, "", THIRD], ["content-warning", "ねたばれ"], ["emoji", "pe", "https://x.test/pe.png"], [...CLIENT_TAG]]) expect(event.tags).toContainEqual(tag);
+    // 説明文がなければ題名は「画像」
+    expect(buildMediaEvent(ME, 20, { body: "", media }, 100).tags).toContainEqual(["title", "画像"]);
+  });
+  it("根への返信に reply の印だけを付けた投稿への返信は、その e を根にする", () => {
+    const event = buildEvent(ME, { mode: "reply", body: "はい", target: target({ tags: [["e", ROOT, "", "reply"], ["p", THIRD]] }) }, 100);
+    expect(event.tags).toContainEqual(["e", ROOT, "", "root", ""]);
+    expect(event.tags).toContainEqual(["e", POST, "", "reply", OTHER]);
+  });
+  it("メンションした人の読み込みリレーへも送る（5 人・9 件まで）", () => {
+    const people = Array.from({ length: 7 }, (_, i) => String(i + 3).repeat(64));
+    expect(deliveryPeople(OTHER, [["p", ME], ["p", OTHER], ...people.map((p) => ["p", p])], ME)).toEqual([OTHER, ...people.slice(0, 4)]);
+    expect(deliveryPeople(null, [], ME)).toEqual([]);
+    const inbox = (n: number) => [`wss://a${n}.test/`, `wss://b${n}.test`, `wss://c${n}.test`, `wss://d${n}.test`, "ws://plain.test"];
+    const relays = relaysForPeople(["wss://mine.test"], [["wss://mine.test", ...inbox(1)], inbox(2), inbox(3), inbox(4)]);
+    expect(relays).toEqual(["wss://mine.test", "wss://a1.test", "wss://b1.test", "wss://c1.test", "wss://a2.test", "wss://b2.test", "wss://c2.test", "wss://a3.test", "wss://b3.test", "wss://c3.test"]);
+  });
+});
+
+describe("注意書き", () => {
+  it("content-warning（200 文字まで）。付けなければない。消える投稿（expiration）は作らない", () => {
+    const post = buildEvent(ME, { mode: "post", body: "ねたばれ", contentWarning: "x".repeat(250) }, 1000, { clientTag: false });
     expect(post.tags).toContainEqual(["content-warning", "x".repeat(200)]);
-    expect(post.tags).toContainEqual(["expiration", "4600"]);
+    expect(post.tags.some((t) => t[0] === "expiration")).toBe(false);
     const plain = buildEvent(ME, { mode: "post", body: "a" }, 1000, { clientTag: false });
     expect(plain.tags.some((t) => t[0] === "content-warning" || t[0] === "expiration")).toBe(false);
   });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { blossomAlternatives, buildBlossomServers, buildFileMetadata, buildMediaPost, checkNip96Response, checkUploadResponse, imetaTags, isNip96, normalizeServer, uploadAuth, withAttachments } from "./media";
+import { blossomAlternatives, buildFileMetadata, buildMediaPost, checkNip96Response, checkUploadResponse, imetaTags, isNip96, normalizeServer, uploadAuth, withAttachments } from "./media";
 
 const SHA = "a".repeat(64);
 const OTHER = "b".repeat(64);
@@ -42,12 +42,11 @@ describe("NIP-96・画像の投稿・サーバー一覧", () => {
     expect(isNip96("https://nostr.build")).toBe(true);
     expect(isNip96("https://blossom.band")).toBe(false);
   });
-  it("kind 1063・kind 20・kind 10063・代わりの URL", () => {
+  it("kind 1063・kind 20・代わりの URL", () => {
     expect(buildFileMetadata(a, 1).tags).toEqual([["url", a.url], ["m", "image/jpeg"], ["x", a.sha256], ["size", "10"], ["dim", "2x3"]]);
-    const post = buildMediaPost(20, " 説明 ", [a], 100, 3600);
+    const post = buildMediaPost(20, " 説明 ", [a], 100);
     expect(post.content).toBe("説明");
-    expect(post.tags).toEqual([["imeta", `url ${a.url}`, "m image/jpeg", `x ${a.sha256}`, "dim 2x3"], ["m", "image/jpeg"], ["x", a.sha256], ["expiration", "3700"]]);
-    expect(buildBlossomServers(["https://b.test/", "http://c", "https://b.test"], 1).tags).toEqual([["server", "https://b.test"]]);
+    expect(post.tags).toEqual([["title", "説明"], ["imeta", `url ${a.url}`, "m image/jpeg", `x ${a.sha256}`, "dim 2x3"], ["m", "image/jpeg"], ["x", a.sha256]]);
     expect(blossomAlternatives(a.url, ["https://x.test", "https://y.test"])).toEqual([`https://y.test/${"a".repeat(64)}.jpg`]);
     expect(uploadAuth("d".repeat(64), "p", 1, "https://blossom.band").tags).toContainEqual(["server", "blossom.band"]);
   });

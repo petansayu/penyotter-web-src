@@ -3,8 +3,8 @@ import type { CustomEmoji } from "../domain/emojis";
 import { home } from "./home.svelte";
 import { loadRelayLists, writeRelays } from "../nostr/outbox";
 import { relaySet } from "../nostr/relayUrl";
-import { buildFileMetadata, buildMediaPost, MAX_ATTACHMENTS, type Attachment } from "../domain/media";
-import { buildEvent, MAX_BODY, withClientTag, type ComposeMode } from "../domain/publishing";
+import { buildFileMetadata, MAX_ATTACHMENTS, type Attachment } from "../domain/media";
+import { buildEvent, buildMediaEvent, MAX_BODY, type ComposeMode } from "../domain/publishing";
 import type { Event } from "../nostr/events";
 import { publish } from "../nostr/pool";
 import { SignerError } from "../nostr/signer";
@@ -48,8 +48,6 @@ class Composer {
   uploading = $state(0);
   /** 注意書き（null なら付けない）。 */
   contentWarning = $state<string | null>(null);
-  /** 消える投稿（何秒後か。null なら消えない）。 */
-  expiresAfter = $state<number | null>(null);
   /** リレーの下書きから開いたとき、その下書き（受理されたら消す）。 */
   remote = $state<{ identifier: string; kind: number } | null>(null);
   /** リレーの下書きの一覧（開いたときに読む）。 */
@@ -66,11 +64,6 @@ class Composer {
 
   setContentWarning(value: string | null) {
     this.contentWarning = value;
-    this.unsent = null;
-  }
-
-  setExpiration(seconds: number | null) {
-    this.expiresAfter = seconds;
     this.unsent = null;
   }
 
@@ -139,13 +132,12 @@ class Composer {
   }
 
   /** 送り先。ほかのアカウントで投稿するときは、その人の書き込みリレー（分からなければログイン中の人の）。 */
-  private async relaysFor(author: string, target: Event | undefined): Promise<string[]> {
-    if (author === viewer.pubkey) return this.mode === "post" ? viewer.writeRelays : deliveryRelays(target);
+  private async relaysFor(author: string, target: Event | undefined, tags: string[][]): Promise<string[]> {
+    if (author === viewer.pubkey) return deliveryRelays(target, tags, author);
     await loadRelayLists([author], viewer.readRelays);
     const theirs = writeRelays(author);
     const base = theirs.length > 0 ? theirs : viewer.writeRelays;
-    if (this.mode === "post") return base;
-    const extra = (await deliveryRelays(target)).filter((url) => !viewer.writeRelays.includes(url));
+    const extra = (await deliveryRelays(target, tags, author)).filter((url) => !viewer.writeRelays.includes(url));
     return relaySet([...base, ...extra]);
   }
 
@@ -248,7 +240,6 @@ class Composer {
       this.target = target;
       this.unsent = null;
       this.contentWarning = null;
-      this.expiresAfter = null;
       this.remote = null;
       const saved = this.draftKey();
       try {
@@ -293,14 +284,14 @@ class Composer {
       if (!event) {
         const now = Math.floor(Date.now() / 1000);
         const template = this.mode === "post" && this.mediaKind !== null
-          ? withClientTag(buildMediaPost(this.mediaKind, this.text, this.attachments, now, this.expiresAfter), settings.clientTag)
-          : buildEvent(author, { mode: this.mode, body: this.text, target, media: this.attachments, customEmojis: [...this.picked, ...emojis.custom], contentWarning: this.contentWarning, expiresAfter: this.expiresAfter }, now, { clientTag: settings.clientTag });
+          ? buildMediaEvent(author, this.mediaKind, { body: this.text, media: this.attachments, customEmojis: [...this.picked, ...emojis.custom], contentWarning: this.contentWarning }, now, { clientTag: settings.clientTag })
+          : buildEvent(author, { mode: this.mode, body: this.text, target, media: this.attachments, customEmojis: [...this.picked, ...emojis.custom], contentWarning: this.contentWarning }, now, { clientTag: settings.clientTag });
         const signer = await viewer.signerFor(author);
         event = await signer.sign(template);
         this.unsent = event;
       }
       this.message = "送っています…";
-      const relays = await this.relaysFor(author, target);
+      const relays = await this.relaysFor(author, target, event.tags);
       const signed = event;
       const result = await publish(relays, signed, (later) => {
         if (this.unsent === null) this.message = summary(later);
@@ -315,7 +306,6 @@ class Composer {
         this.text = "";
         this.attachments = [];
         this.contentWarning = null;
-        this.expiresAfter = null;
         this.mediaKind = null;
         this.poster = null;
         this.saveDraft();
@@ -334,7 +324,8 @@ class Composer {
         toast.show(this.message);
       }
     } catch (e) {
-      this.message = e instanceof SignerError || e instanceof Error ? e.message : String(e);
+      // 署名を断られたときは、理由と、本文は残っていることを出す（Android 版 1.0.0 と同じ）
+      this.message = e instanceof SignerError ? `${e.message}下書きを保持しています。` : e instanceof Error ? e.message : String(e);
     } finally {
       this.sending = false;
     }

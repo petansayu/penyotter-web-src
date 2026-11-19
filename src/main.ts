@@ -3,11 +3,14 @@ import './app.css'
 import App from './App.svelte'
 import { installDevSigner } from './lib/nostr/devSigner'
 import { pwa } from './lib/store/pwa.svelte'
+import { takeSharedFromUrl } from './lib/store/share.svelte'
 
 // テストモードだけ、使い捨ての鍵で署名する偽の NIP-07 を入れる（本番用のビルドでは何もしない）
 installDevSigner()
 // PWA の Service Worker（ビルドしたものだけ）
 pwa.register()
+// ほかのアプリからの共有（share_target）で開かれたら、その文を取っておく
+takeSharedFromUrl()
 
 // 画面の部品（あとから読むもの）が読めなかったら、1 度だけ開き直す（公開の切り替えの途中に開いていたときなど）。
 // 開き直しても読めないときは、繰り返さない

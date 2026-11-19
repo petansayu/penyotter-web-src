@@ -3,10 +3,11 @@ import { PEUSA_CLEAR, PEUSA_FACES } from "./peusa-faces";
 import { settings } from "./settings.svelte";
 
 // 設定はブラウザの保存と画面の色に触れるので、テストでは値だけのものに置き換える
-vi.mock("./settings.svelte", () => ({ settings: { peusaMode: false, peusaLevel: "medium" } }));
+vi.mock("./settings.svelte", () => ({ settings: { peusaParts: new Set() } }));
 import { emojiTag } from "../domain/emojis";
 import { encodeHidden, splitHidden } from "../domain/hiddenMessages";
-import { PEUSA_PARTY, peusa, peusaAvatars, peusaClearOf, peusaFace, peusaFaceOf, peusaFailure, peusaMood, peusaStrong } from "./peusa.svelte";
+import { PEUSA_PARTY, peusa, peusaClearOf, peusaFace, peusaFaceOf, peusaFailure, peusaMood, peusaOn } from "./peusa.svelte";
+import { PEUSA_PARTS, peusaPartsOf, readPeusaCustom, type PeusaPart } from "../domain/peusaParts";
 
 describe("スーパーぺぇうさモード", () => {
   it("季節の顔", () => {
@@ -22,17 +23,20 @@ describe("スーパーぺぇうさモード", () => {
     // 季節の顔（自分のアイコン用）はほかの人には使わない
     expect(PEUSA_FACES).not.toContain("face-spring");
   });
-  it("強さ（弱はアイコンそのまま、強はアプリのアイコンも）", () => {
-    settings.peusaMode = true;
-    settings.peusaLevel = "weak";
-    expect([peusaAvatars(), peusaStrong()]).toEqual([false, false]);
-    settings.peusaLevel = "medium";
-    expect([peusaAvatars(), peusaStrong()]).toEqual([true, false]);
-    settings.peusaLevel = "strong";
-    expect([peusaAvatars(), peusaStrong()]).toEqual([true, true]);
-    settings.peusaMode = false;
-    expect([peusaAvatars(), peusaStrong()]).toEqual([false, false]);
-    settings.peusaLevel = "medium";
+  it("強さ（弱はアイコンそのまま、中はみんなのアイコン、強は全部）と、かすたむ（Android 版の PeusaLevel.parts と同じ）", () => {
+    const weak = peusaPartsOf("weak", []);
+    expect(weak.has("theme") && !weak.has("othersAvatars")).toBe(true);
+    expect([...peusaPartsOf("medium", [])].filter((p) => !weak.has(p)).sort()).toEqual(["othersAvatars", "ownAvatar"]);
+    expect(peusaPartsOf("strong", []).size).toBe(PEUSA_PARTS.length);
+    // かすたむは最初は中と同じで、選んだものだけ（何もなしも）。知らない名前は捨てる
+    expect(new Set(readPeusaCustom(null))).toEqual(peusaPartsOf("medium", []));
+    expect(readPeusaCustom(["peek", "gone", "ownAvatar"])).toEqual(["ownAvatar", "peek"]);
+    expect(readPeusaCustom([])).toEqual([]);
+    expect([...peusaPartsOf("custom", ["peek"])]).toEqual(["peek"]);
+    // 画面の判定はいまの部品を見る
+    (settings as unknown as { peusaParts: Set<PeusaPart> }).peusaParts = new Set(["appIcons"]);
+    expect([peusaOn("appIcons"), peusaOn("othersAvatars")]).toEqual([true, false]);
+    (settings as unknown as { peusaParts: Set<PeusaPart> }).peusaParts = new Set();
   });
   it("タブとメニューのぺぇうさは背景を透明にした顔で、どれも違う（Android 版の Peusa.clearOf と同じ）", () => {
     expect(PEUSA_CLEAR.length).toBe(PEUSA_FACES.length);

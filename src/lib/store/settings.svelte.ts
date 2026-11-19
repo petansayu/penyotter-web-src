@@ -1,6 +1,7 @@
 import { applyTheme, PEUSA_THEME, THEMES, type Mode, type Theme } from "../ui/themes";
 import { readSavedThemes, themeOf, writeSavedThemes, type SavedTheme } from "../ui/customTheme";
 import { parseSetAddress, type CustomEmoji } from "../domain/emojis";
+import { peusaPartsOf, readPeusaCustom, type PeusaLevel, type PeusaPart } from "../domain/peusaParts";
 
 /**
  * 見た目などの設定。ブラウザごとに保存する（Android 版の「見た目」の端末ごとの設定 AppearanceSettings と同じ項目と
@@ -43,11 +44,11 @@ interface Saved {
   peusaUnlocked: boolean;
   peusaMode: boolean;
   peusaLevel: PeusaLevel;
+  peusaCustom: PeusaPart[];
   oneTap: OneTap;
 }
 
-/** スーパーぺぇうさモードの強さ。 */
-export type PeusaLevel = "weak" | "medium" | "strong";
+export type { PeusaLevel };
 
 const DEFAULTS: Saved = {
   theme: "sky",
@@ -73,6 +74,7 @@ const DEFAULTS: Saved = {
   peusaUnlocked: false,
   peusaMode: false,
   peusaLevel: "medium",
+  peusaCustom: readPeusaCustom(null),
   oneTap: { content: "+" },
 };
 
@@ -117,7 +119,8 @@ function read(): Saved {
       topicTools: flag("topicTools"),
       peusaUnlocked: flag("peusaUnlocked"),
       peusaMode: flag("peusaMode"),
-      peusaLevel: saved.peusaLevel === "weak" || saved.peusaLevel === "strong" ? saved.peusaLevel : "medium",
+      peusaLevel: saved.peusaLevel === "weak" || saved.peusaLevel === "strong" || saved.peusaLevel === "custom" ? saved.peusaLevel : "medium",
+      peusaCustom: readPeusaCustom(saved.peusaCustom),
       oneTap: readOneTap(saved.oneTap),
     };
   } catch {
@@ -170,6 +173,12 @@ class Settings {
   peusaMode = $state(false);
   /** スーパーぺぇうさモードの強さ（弱：アイコンはそのまま、中：みんなのアイコン、強：アプリのアイコンも。Android 版の peusaLevel）。 */
   peusaLevel = $state<PeusaLevel>("medium");
+  /** かすたむで選んだ部品（Android 版の peusaCustom。まだ選んでいなければ中と同じ）。 */
+  peusaCustom = $state<PeusaPart[]>(DEFAULTS.peusaCustom);
+  /** いま出す部品（モードがオフなら空）。 */
+  get peusaParts(): Set<PeusaPart> {
+    return this.peusaMode ? peusaPartsOf(this.peusaLevel, this.peusaCustom) : new Set();
+  }
   oneTap = $state<OneTap>(DEFAULTS.oneTap);
   /** じぶんで作ったカラーテーマ（このブラウザに保存）。 */
   savedThemes = $state<SavedTheme[]>(readSavedThemes());
@@ -226,6 +235,7 @@ class Settings {
       peusaUnlocked: this.peusaUnlocked,
       peusaMode: this.peusaMode,
       peusaLevel: this.peusaLevel,
+      peusaCustom: this.peusaCustom,
       oneTap: this.oneTap,
     };
   }
@@ -233,7 +243,7 @@ class Settings {
   /** 変わるたびにテーマと文字の大きさを当て直して保存する。App から $effect で呼ぶ。 */
   apply() {
     const saved = this.snapshot();
-    applyTheme(this.peusaMode ? PEUSA_THEME : this.currentTheme, this.dark);
+    applyTheme(this.peusaParts.has("theme") ? PEUSA_THEME : this.currentTheme, this.dark);
     document.documentElement.style.fontSize = `${15 * this.textScale}px`;
     document.documentElement.classList.toggle("compact-posts", this.compactPosts);
     try {

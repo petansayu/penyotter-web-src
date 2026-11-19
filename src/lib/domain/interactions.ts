@@ -25,6 +25,31 @@ export function reactionTarget(event: Event): string | null {
   return null;
 }
 
+/** リアクション・リポスト（それ自体にもリアクション・リポストできる。NIP-25・NIP-18）。 */
+export const INTERACTION_KINDS = [6, 7, 16];
+export const isInteraction = (kind: number) => INTERACTION_KINDS.includes(kind);
+
+/** リアクション・リポストの先（最後の `e`。Android 版の Interactions.target）。 */
+export function interactionTarget(event: Event): string | null {
+  if (!isInteraction(event.kind)) return null;
+  for (let i = event.tags.length - 1; i >= 0; i--) {
+    const tag = event.tags[i];
+    if (tag.length >= 2 && tag[0] === "e" && isHex64(tag[1])) return tag[1];
+  }
+  return null;
+}
+
+/** targets へのリアクション・リポストを、先ごとに古い順で（作者本人が kind 5 で取り消したものは除く）。 */
+export function interactionsByTarget(events: Iterable<Event>, targets: Set<string>, keys: Set<string>): Map<string, Event[]> {
+  const result = new Map<string, Event[]>();
+  for (const event of [...events].sort((a, b) => a.created_at - b.created_at)) {
+    const target = interactionTarget(event);
+    if (!target || !targets.has(target) || deletedBy(keys, event)) continue;
+    result.set(target, [...(result.get(target) ?? []), event]);
+  }
+  return result;
+}
+
 /**
  * kind 5 で、その作者本人が削除を依頼したイベントの ID（`作者:ID` の組）。削除の依頼として扱うのは、
  * イベントの作者本人の kind 5 だけ（ほかの人の kind 5 は無視する）。

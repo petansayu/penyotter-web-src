@@ -156,9 +156,10 @@ export function groupAuthors(authors: string[]): string[][] {
  * 1 つの REQ の authors は AUTHORS_PER_REQ 人まで。pinned の人は、そのリレーが 12 件に入らなくても問い合わせる
  * （自分の書き込みリレーがフォロー中の人とあまり重ならないと、自分の投稿がホームに出なかったため）。
  */
-export function planAuthors(pubkeys: string[], pinned: PinnedAuthor[] = []): AuthorPlan[] {
+export function planAuthors(pubkeys: string[], pinned: PinnedAuthor[] = [], routed = true): AuthorPlan[] {
   const byRelay = new Map<string, string[]>();
-  for (const pubkey of new Set(pubkeys)) {
+  // routed が false（設定「フォロー中の読み方」の「自分の読み取りリレーだけ」）なら、相手のリレーへはつながず、pinned だけ
+  for (const pubkey of routed ? new Set(pubkeys) : []) {
     for (const url of writeRelays(pubkey)) {
       const authors = byRelay.get(url);
       if (authors) authors.push(pubkey);
@@ -187,9 +188,9 @@ export function chunkAuthors(base: Filter, authors: string[]): Filter[] {
  * 常時接続リレーへ全員分を送る（取りこぼしを防ぐため）。
  */
 export async function fetchFromAuthors(pubkeys: string[], base: Filter, alwaysOn: string[],
-  onEvent?: (event: Event) => void, perRelayLimit = 4000, pinned: PinnedAuthor[] = []): Promise<Fetched> {
-  await loadRelayLists(pubkeys, alwaysOn);
-  const plans = planAuthors(pubkeys, pinned);
+  onEvent?: (event: Event) => void, perRelayLimit = 4000, pinned: PinnedAuthor[] = [], routed = true): Promise<Fetched> {
+  if (routed) await loadRelayLists(pubkeys, alwaysOn);
+  const plans = planAuthors(pubkeys, pinned, routed);
   const outbox = runLimited(plans, 8, (plan) => pool.fetch([plan.relay], chunkAuthors(base, plan.authors), { limit: perRelayLimit, onEvent }));
   const everyone = delay(700).then(async () => merge(await Promise.all(groupAuthors([...new Set(pubkeys)]).map((group) => pool.fetch(alwaysOn, chunkAuthors(base, group), { onEvent })))));
   const [outboxResults, everyoneResult] = await Promise.all([outbox, everyone]);
@@ -198,8 +199,8 @@ export async function fetchFromAuthors(pubkeys: string[], base: Filter, alwaysOn
 }
 
 /** 何人分かを購読する（4.4.3 と同じ分け方。打ち切りはない）。 */
-export function subscribeAuthors(pubkeys: string[], base: Filter, alwaysOn: string[], onEvent: (event: Event) => void, pinned: PinnedAuthor[] = []): () => void {
-  const closers = planAuthors(pubkeys, pinned).map((plan) => pool.subscribe([plan.relay], chunkAuthors(base, plan.authors), onEvent));
+export function subscribeAuthors(pubkeys: string[], base: Filter, alwaysOn: string[], onEvent: (event: Event) => void, pinned: PinnedAuthor[] = [], routed = true): () => void {
+  const closers = planAuthors(pubkeys, pinned, routed).map((plan) => pool.subscribe([plan.relay], chunkAuthors(base, plan.authors), onEvent));
   for (const group of groupAuthors([...new Set(pubkeys)])) closers.push(pool.subscribe(alwaysOn, chunkAuthors(base, group), onEvent));
   return () => closers.forEach((close) => close());
 }

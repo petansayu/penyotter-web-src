@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Event } from "nostr-tools";
-import { compact, countInteractions, deletedBy, deletionKeys, ownActions, reactionTarget } from "./interactions";
+import { compact, countInteractions, deletedBy, deletionKeys, interactionsByTarget, interactionTarget, ownActions, reactionTarget } from "./interactions";
+import { buildEvent, buildRepost } from "./publishing";
 
 const AUTHOR = "a".repeat(64);
 const OTHER = "b".repeat(64);
@@ -67,5 +68,31 @@ describe("ownActions", () => {
     expect(result.reposts.has("9".repeat(64))).toBe(false);
     expect(result.reactions.has("8".repeat(64))).toBe(false);
     expect(result.removed).toEqual(new Set([undone.id]));
+  });
+});
+
+describe("リアクション・リポストへのリアクション・リポスト（Android 版の Interactions と同じ）", () => {
+  const REACTION = "2".repeat(64);
+  const REPOST = "3".repeat(64);
+  it("先（最後の e）ごとにまとめ、本人が取り消したものは除く", () => {
+    const toReaction = event({ kind: 7, created_at: 10, tags: [["e", REACTION], ["p", AUTHOR], ["k", "7"]], content: "🥟" });
+    const repostOfReaction = event({ kind: 16, created_at: 11, tags: [["e", REACTION, "wss://r.example"], ["p", AUTHOR], ["k", "7"]] });
+    const toRepost = event({ kind: 7, created_at: 12, tags: [["e", NOTE], ["e", REPOST], ["p", AUTHOR]], content: "+" });
+    const removed = event({ kind: 7, created_at: 13, tags: [["e", REPOST]], content: "❤️" });
+    const deletion = event({ kind: 5, tags: [["e", removed.id]] });
+    const reply = event({ kind: 1, tags: [["e", REACTION]] });
+    const grouped = interactionsByTarget([repostOfReaction, toReaction, toRepost, removed, reply], new Set([REACTION, REPOST]), deletionKeys([deletion]));
+    expect(grouped.get(REACTION)?.map((e) => e.id)).toEqual([toReaction.id, repostOfReaction.id]);
+    expect(grouped.get(REPOST)?.map((e) => e.id)).toEqual([toRepost.id]);
+    expect(interactionTarget(reply)).toBeNull();
+  });
+  it("リアクションのリポストは kind 16 と k=7、リポストへのリアクションは k=6", () => {
+    const reaction = { ...event({ kind: 7, pubkey: AUTHOR, tags: [["e", NOTE], ["p", OTHER]], content: "🥟" }), id: REACTION };
+    const repost = buildRepost(reaction, "wss://r.example", 300, { clientTag: false });
+    expect(repost.kind).toBe(16);
+    expect(repost.tags).toEqual([["e", REACTION, "wss://r.example"], ["p", AUTHOR], ["k", "7"]]);
+    const target = { ...event({ kind: 6, pubkey: OTHER, tags: [["e", NOTE], ["p", AUTHOR]] }), id: REPOST };
+    const like = buildEvent(AUTHOR, { mode: "like", body: "+", target }, 300, { clientTag: false });
+    expect(like.tags).toEqual([["e", REPOST, "", OTHER], ["p", OTHER], ["k", "6"]]);
   });
 });

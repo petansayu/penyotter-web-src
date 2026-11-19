@@ -22,11 +22,13 @@
   import { viewer } from "../store/viewer.svelte";
   import Avatar from "./Avatar.svelte";
   import BadgeDetail from "./BadgeDetail.svelte";
-  import PostCalendar from "./PostCalendar.svelte";
   import { badges as badgeStore } from "../store/badges.svelte";
   import Content from "./Content.svelte";
   import Icon from "./Icon.svelte";
   import ProfileEditor from "./ProfileEditor.svelte";
+  import PostWatchDialog from "./PostWatchDialog.svelte";
+  import { postWatch } from "../store/postWatch.svelte";
+  import { watchSummary } from "../domain/watchedPosts";
   import Timeline from "./Timeline.svelte";
 
   /** プロフィール（技術資料 5.5、Android 版の ProfilePanel）。タブは投稿・記事・リアクション・リレー、数を押すとフォロー・フォロワー。 */
@@ -42,6 +44,9 @@
   const following = $derived(viewer.follows.includes(pubkey));
   const muted = $derived(viewer.mutedPubkeys.has(pubkey));
   let editing = $state(false);
+  // 投稿のお知らせ（このブラウザだけ。見るだけのアカウントでも使える）
+  const watchRule = $derived(viewer.pubkey ? postWatch.rules(viewer.pubkey).find((rule) => rule.pubkey === pubkey) ?? null : null);
+  let watchEditing = $state(false);
 
   /** 投稿タブの印: 引用・返信（kind 1111 はコメント）・メンション。リポストには付けない（Android 版の ProfileActivityLabel）。 */
   function activityLabel(card: Card): string | null {
@@ -64,7 +69,6 @@
   let pinned = $state<Event[]>([]);
   let badges = $state<Badge[]>([]);
   let createdBadges = $state<Badge[]>([]);
-  let calendarOpen = $state(false);
   /** 詳細を開いているバッジ。 */
   let openedBadge = $state<Badge | null>(null);
   let followingIds = $state<string[] | null>(null);
@@ -199,6 +203,13 @@
         </div>
       {/if}
     {/if}
+    {#if viewer.pubkey && !self}
+      {#if watchRule}
+        <button type="button" class="link watching" onclick={() => (watchEditing = true)}><Icon name="notificationsActive" size={14} />投稿をお知らせに出しています（{watchSummary(watchRule)}）</button>
+      {:else}
+        <button type="button" class="link" onclick={() => (watchEditing = true)}>投稿をお知らせに出す…</button>
+      {/if}
+    {/if}
     {#if profile?.name && profile.displayName && profile.name !== profile.displayName}<div class="muted">@{profile.name}</div>{/if}
     {#if profile?.nip05}
       <div class="nip05">
@@ -240,8 +251,6 @@
     {#if openedBadge}<BadgeDetail badge={openedBadge} awardedAt={openedBadge.awardedAt} close={() => (openedBadge = null)} />{/if}
     {#if profile?.lud16}<div class="muted small">⚡ {profile.lud16}</div>{/if}
     {#if profile?.website}<a href={profile.website} target="_blank" rel="noopener noreferrer nofollow">{profile.website}</a>{/if}
-    <button type="button" class="calendar-button" onclick={() => (calendarOpen = true)}>投稿カレンダー</button>
-    {#if calendarOpen}<PostCalendar {pubkey} close={() => (calendarOpen = false)} />{/if}
     <div class="counts">
       <button type="button" onclick={() => select("following")}><strong>{followingIds ? followingIds.length : "—"}</strong> フォロー</button>
       <button type="button" onclick={() => select("followers")}><strong>{followerCount ? `${followerCount.approximate ? "約" : ""}${followerCount.count}` : "—"}</strong> フォロワー</button>
@@ -251,6 +260,7 @@
 
 {#if editing}<ProfileEditor close={() => (editing = false)} />{/if}
 {#if reporting}<ReportDialog target={{ pubkey }} close={() => (reporting = false)} />{/if}
+{#if watchEditing && viewer.pubkey}<PostWatchDialog me={viewer.pubkey} {pubkey} rule={watchRule} close={() => (watchEditing = false)} />{/if}
 
 <div class="tabs" role="tablist">
   {#each TABS as [key, label] (key)}
@@ -303,18 +313,6 @@
 {/if}
 
 <style>
-  .calendar-button {
-    display: block;
-    margin: 6px 0;
-    padding: 4px 12px;
-    font: inherit;
-    font-size: 0.85em;
-    color: var(--primary);
-    background: none;
-    border: 1px solid var(--outline);
-    border-radius: 999px;
-    cursor: pointer;
-  }
   .badges-link {
     display: inline-flex;
     align-items: center;
@@ -466,6 +464,12 @@
     background: none;
     border: none;
     cursor: pointer;
+  }
+  .watching {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    text-align: left;
   }
   .write {
     display: inline-block;

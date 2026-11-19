@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { peusaOn } from "../store/peusa.svelte";
   import PeusaEmpty from "./PeusaEmpty.svelte";
   import PeusaLoading from "./PeusaLoading.svelte";
   import { settings } from "../store/settings.svelte";
@@ -143,14 +144,14 @@
 {/each}
 
 <div class="footer" bind:this={sentinel}>
-  {#if feed.loading && settings.peusaMode}
+  {#if feed.loading && peusaOn("placeholders")}
     <PeusaLoading />
   {:else if feed.loading}
     <span>読み込んでいます…</span>
   {:else if feed.message}
     <span>{feed.message}</span>
     {#if !feed.finished}<button type="button" onclick={() => feed.more()}>もう一度読む</button>{/if}
-  {:else if feed.finished && limit >= cards.length && cards.length === 0 && settings.peusaMode}
+  {:else if feed.finished && limit >= cards.length && cards.length === 0 && peusaOn("placeholders")}
     <PeusaEmpty picture={bookmark ? "empty-home" : "empty-search"} message={empty} />
   {:else if feed.finished && limit >= cards.length}
     <span>{cards.length === 0 ? empty : "ここまでです"}</span>

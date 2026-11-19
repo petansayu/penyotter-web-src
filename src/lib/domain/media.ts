@@ -20,7 +20,6 @@ export const MAX_ATTACHMENTS = 4;
 /** 画像の投稿先の候補（Android 版の BlossomSettings.DESTINATIONS と同じ）。NIP-96 のものは nip96。 */
 export const UPLOAD_SERVERS: { url: string; label: string; nip96?: boolean }[] = [
   { url: "https://blossom.band", label: "blossom.band（おすすめ）" },
-  { url: "https://cdn.nostr.build", label: "cdn.nostr.build" },
   { url: "https://blossom.primal.net", label: "blossom.primal.net" },
   { url: "https://nostrcheck.me", label: "nostrcheck.me（NIP-96）", nip96: true },
   { url: "https://nostr.build", label: "nostr.build（NIP-96）", nip96: true },
@@ -28,6 +27,12 @@ export const UPLOAD_SERVERS: { url: string; label: string; nip96?: boolean }[] =
   { url: "https://nostpic.com", label: "nostpic.com（NIP-96）", nip96: true },
   { url: "https://yabu.me", label: "yabu.me（NIP-96）", nip96: true },
 ];
+/**
+ * 候補から外した投稿先と、代わりに使うもの。cdn.nostr.build は Blossom の `PUT /upload` が 404 を返すので外した
+ * （Android 版の 1.0.0 と同じ。選んでいた人は blossom.band として読む）。
+ */
+export const RETIRED_UPLOAD_SERVERS: Record<string, string> = { "https://cdn.nostr.build": "https://blossom.band" };
+
 /** NIP-96 で送る投稿先か（候補にあるものだけ。ほかは Blossom とみなす。Android 版と同じ）。 */
 export const isNip96 = (server: string) => UPLOAD_SERVERS.some((s) => s.url === server && s.nip96);
 export const DEFAULT_UPLOAD_SERVER = UPLOAD_SERVERS[0].url;
@@ -121,25 +126,22 @@ export function buildFileMetadata(a: Attachment, now: number) {
   return { kind: 1063, created_at: now, tags, content: "" };
 }
 
+/** 画像・動画の投稿の題名（NIP-68・NIP-71 の `title`）。説明文の最初の行（80 文字まで）、なければ「画像」「動画」。 */
+export const mediaTitle = (kind: number, description: string) =>
+  description.split(/\r?\n/).map((line) => line.trim()).find((line) => line !== "")?.slice(0, 80) ?? (kind === 20 ? "画像" : "動画");
+
 /** 画像・動画の投稿（NIP-68・NIP-71、kind 20・21・22）。content は説明文。 */
 export const MEDIA_POST_KINDS = [20, 21, 22] as const;
-export function buildMediaPost(kind: number, description: string, media: Attachment[], now: number, expiresAfter?: number | null) {
+export function buildMediaPost(kind: number, description: string, media: Attachment[], now: number) {
   if (![20, 21, 22, 34235, 34236].includes(kind) || media.length === 0) throw new Error("画像・動画を付けてください");
   const tags: string[][] = [];
   if (kind === 34235 || kind === 34236) tags.push(["d", media[0].sha256]);
+  tags.push(["title", mediaTitle(kind, description).slice(0, 200)]);
   for (const a of media) {
     tags.push(["imeta", `url ${a.url}`, `m ${a.type}`, `x ${a.sha256}`, ...(a.dim ? [`dim ${a.dim}`] : [])]);
     tags.push(["m", a.type], ["x", a.sha256]);
   }
-  if (expiresAfter && expiresAfter > 0) tags.push(["expiration", String(now + expiresAfter)]);
   return { kind, created_at: now, tags, content: description.trim().slice(0, 20000) };
-}
-
-/** Blossom のサーバー一覧（kind 10063）。https のもの 12 件まで。 */
-export function buildBlossomServers(servers: string[], now: number) {
-  const safe = [...new Set(servers.map((s) => s.trim().replace(/\/+$/, "")).filter((s) => s.startsWith("https://")))].slice(0, 12);
-  if (safe.length === 0) throw new Error("https のサーバーを 1 つ以上入れてください");
-  return { kind: 10063, created_at: now, tags: safe.map((s) => ["server", s]), content: "" };
 }
 
 /** kind 10063 のサーバー。 */

@@ -137,7 +137,7 @@ export function requestProfiles(pubkeys: Iterable<string>) {
     for (let i = 0; i < batch.length; i += 80) {
       const authors = batch.slice(i, i + 80);
       const keep = (event: Event) => keepProfiles([event]);
-      void fetchFromAuthors(authors, { kinds: [0] }, viewer.alwaysOn, keep);
+      void fetchFromAuthors(authors, { kinds: [0] }, viewer.alwaysOn, keep, 4000, [], viewer.followOutbox);
       void pool.fetch(INDEXER_RELAYS, [{ kinds: [0], authors }], { onEvent: keep });
     }
   }, 150);

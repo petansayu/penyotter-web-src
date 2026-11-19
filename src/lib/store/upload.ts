@@ -1,4 +1,4 @@
-import { checkNip96Response, checkUploadResponse, DEFAULT_UPLOAD_SERVER, isNip96, nip96Auth, normalizeServer, uploadAuth, type Attachment } from "../domain/media";
+import { checkNip96Response, checkUploadResponse, DEFAULT_UPLOAD_SERVER, isNip96, RETIRED_UPLOAD_SERVERS, nip96Auth, normalizeServer, uploadAuth, type Attachment } from "../domain/media";
 import { viewer } from "./viewer.svelte";
 
 /**
@@ -22,7 +22,8 @@ export function uploadServer(pubkey: string | null): string {
   if (TEST_BLOSSOM) return TEST_BLOSSOM;
   try {
     const saved = pubkey ? localStorage.getItem(key(pubkey)) : null;
-    return (saved && normalizeServer(saved)) || DEFAULT_UPLOAD_SERVER;
+    const server = (saved && normalizeServer(saved)) || DEFAULT_UPLOAD_SERVER;
+    return RETIRED_UPLOAD_SERVERS[server] ?? server;
   } catch {
     return DEFAULT_UPLOAD_SERVER;
   }
@@ -126,15 +127,6 @@ async function uploadNip96(server: string, prepared: Prepared, sha256: string): 
 /** 1 つ送る。署名（kind 24242、NIP-96 は kind 27235）は送るたびに頼む。 */
 export async function uploadFile(file: File): Promise<Attachment> {
   return uploadPrepared(await prepare(file), file.name || "file");
-}
-
-/** DM のファイルの上限（Android 版の BlossomUploader.MAX_BYTES と同じ）。 */
-export const MAX_RAW_BYTES = 25 * 1024 * 1024;
-
-/** 描き直さずにそのまま送る（DM の暗号化したファイル。種類は application/octet-stream）。 */
-export async function uploadRaw(data: Uint8Array): Promise<Attachment> {
-  if (data.length > MAX_RAW_BYTES) throw new Error("ファイルが大きすぎます（25MB まで）");
-  return uploadPrepared({ blob: new Blob([data as BlobPart], { type: "application/octet-stream" }), type: "application/octet-stream" }, "file");
 }
 
 async function uploadPrepared(prepared: Prepared, name: string): Promise<Attachment> {

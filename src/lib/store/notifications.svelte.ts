@@ -1,9 +1,14 @@
 import { SvelteMap, SvelteSet } from "svelte/reactivity";
-import { actor, eligible, NOT_TARGETS, NOTIFICATION_KINDS, notificationGroups, notificationTarget, reactedTo, type NotificationType } from "../domain/notifications";
+import { actor, NOT_TARGETS, NOTIFICATION_KINDS, notificationGroups, notificationTarget, reactedTo, shownAsNotification, type NotificationType } from "../domain/notifications";
+import { WATCH_KINDS, watchSince, type WatchRule } from "../domain/watchedPosts";
+import { postWatch } from "./postWatch.svelte";
 import { byNewest, type Event, type Filter } from "../nostr/events";
-import { fetchFromAuthor, loadRelayLists, planAuthors } from "../nostr/outbox";
+import { fetchFromAuthor, fetchFromAuthors, loadRelayLists, planAuthors, subscribeAuthors } from "../nostr/outbox";
 import { delay, eventsOf, merge, pool, type Fetched } from "../nostr/pool";
-import { keepNotes, notes, requestProfiles } from "./cache.svelte";
+import { lnurlpEndpoint, parseLightningAddress } from "../domain/zaps";
+import { isInteraction } from "../domain/interactions";
+import { isHex64 } from "../nostr/events";
+import { keepNotes, notes, profiles, requestProfiles } from "./cache.svelte";
 import { readEvents, readScope, saveScope } from "./db";
 import { viewer } from "./viewer.svelte";
 
@@ -28,6 +33,9 @@ class Notifications {
   readonly read = new SvelteSet<string>();
   type = $state<NotificationType>("all");
   following = $state(false);
+  /** 自分宛ての zap レシートを署名してよい鍵（自分の Lightning アドレスのサーバーの nostrPubkey）。分からなければ null。 */
+  zapIssuer = $state<string | null>(null);
+  private issuerAsked: string | null = null;
   loading = $state(false);
   finished = $state(false);
   message = $state<string | null>(null);
@@ -39,6 +47,9 @@ class Notifications {
   private startedAt = 0;
   private generation = 0;
   private stopLive: (() => void) | undefined;
+  /** 投稿のお知らせの分は、通知とは別にさかのぼる（よく書く人の投稿で、ほかの通知を読み飛ばさないため）。 */
+  private watchUntil: number | undefined;
+  private watchDone = false;
   private buffer: Event[] = [];
   private flushTimer: ReturnType<typeof setTimeout> | undefined;
   private hiddenAt: number | null = null;
@@ -59,21 +70,58 @@ class Notifications {
     });
   }
 
+  /** 投稿のお知らせに出す人（見る人ごと、ブラウザの中だけ）。 */
+  get watches(): WatchRule[] {
+    return this.owner ? postWatch.rules(this.owner) : [];
+  }
+
+  /** お知らせに出す人や条件を変えたあとに呼ぶ。読み直して、購読をやり直す。 */
+  watchesChanged() {
+    if (!this.owner || !this.networkStarted) return;
+    this.watchUntil = undefined;
+    this.watchDone = false;
+    this.live(Math.floor(Date.now() / 1000) - 30);
+    void this.refresh();
+  }
+
   /** 見る人宛ての通知のうち、まだ読んでいないものの数（絞り込みによらない）。 */
   unread = $derived.by(() => {
     if (!this.owner) return 0;
-    const groups = notificationGroups(this.events.values(), this.owner, { type: "all", muted: viewer.mutedPubkeys, mutedNotes: viewer.mutedEvents });
+    const groups = notificationGroups(this.events.values(), this.owner, { type: "all", muted: viewer.mutedPubkeys, mutedNotes: viewer.mutedEvents, words: { words: viewer.mutedWords, hashtags: viewer.mutedHashtags }, zapIssuer: this.zapIssuer, watches: this.watches });
     const ids = new Set(groups.flatMap((group) => group.events.map((event) => event.id)));
     let count = 0;
     for (const id of ids) if (!this.read.has(id)) count++;
     return count;
   });
 
+  /**
+   * 自分の Lightning アドレスのサーバーに、zap レシートを署名する鍵を見る人ごとに 1 回だけ聞く（NIP-57。Android 版の
+   * NotificationsController.learnZapIssuer と同じ）。プロフィールに Lightning アドレスがなければ聞かない。
+   */
+  learnZapIssuer(pubkey: string) {
+    const lud16 = profiles.get(pubkey)?.profile.lud16;
+    if (!lud16 || this.issuerAsked === pubkey) return;
+    this.issuerAsked = pubkey;
+    void (async () => {
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 20_000);
+        const response = await fetch(lnurlpEndpoint(parseLightningAddress(lud16)), { headers: { Accept: "application/json" }, signal: controller.signal, credentials: "omit", referrerPolicy: "no-referrer" }).finally(() => clearTimeout(timer));
+        const text = response.ok ? await response.text() : "";
+        const key = text.length <= 100_000 ? (JSON.parse(text || "{}") as { nostrPubkey?: unknown }).nostrPubkey : undefined;
+        if (typeof key === "string" && isHex64(key) && this.owner === pubkey) this.zapIssuer = key;
+      } catch {
+        // 分からなければ、署名した人は比べない
+      }
+    })();
+  }
+
   /** 見る人が決まったらすぐ呼ぶ。保存した既読・絞り込み・通知を出す（リレーには問い合わせない）。 */
   prepare(pubkey: string) {
     if (this.owner === pubkey) return;
     this.stop();
     this.owner = pubkey;
+    this.zapIssuer = null;
     this.networkStarted = false;
     this.events.clear();
     this.read.clear();
@@ -103,11 +151,12 @@ class Notifications {
 
   /** 保存した通知と、その対象の投稿を先に出す（技術資料 5.1）。 */
   private async showSaved(me: string) {
-    const saved = (await readScope(me, "notifications")).filter((event) => eligible(event, me));
+    const watches = postWatch.rules(me);
+    const saved = (await readScope(me, "notifications")).filter((event) => shownAsNotification(event, me, watches));
     const targets = [...new Set(saved.map(notificationTarget).filter((id): id is string => !!id && !notes.has(id)))];
     const found = await readEvents(me, targets);
     keepNotes(found, null);
-    const reacted = found.filter((event) => event.kind === 7).map(reactedTo).filter((ref) => !!ref && !notes.has(ref.id)).map((ref) => ref!.id);
+    const reacted = found.filter((event) => isInteraction(event.kind)).map(reactedTo).filter((ref) => !!ref && !notes.has(ref.id)).map((ref) => ref!.id);
     keepNotes(await readEvents(me, reacted), null);
     if (this.owner !== me) return;
     for (const event of saved) if (!this.events.has(event.id)) this.events.set(event.id, event);
@@ -177,26 +226,35 @@ class Notifications {
       this.limit = 100;
       this.emptyRuns = 0;
       this.finished = false;
+      this.watchUntil = undefined;
+      this.watchDone = false;
     }
+    const watches = this.watches;
     const filter: Filter = { kinds: NOTIFICATION_KINDS, "#p": [me], limit: this.limit, ...(this.until !== undefined ? { until: this.until } : {}) };
     const onEvent = (event: Event) => {
       if (generation === this.generation) this.queue(event);
     };
     const timeout = delay(LIMIT_MS).then(() => null);
     try {
+      const watchedPage = this.fetchWatched(watches, onEvent);
       const fetched = await Promise.race([this.fetchPage(filter, onEvent), timeout]);
       if (generation !== this.generation) return;
       if (!fetched) {
         this.message = "リレーの応答が遅いため、取得を打ち切りました。取得できた通知を表示しています。再取得できます。";
         return;
       }
-      const events = eventsOf(fetched).filter((event) => eligible(event, me));
+      const watched = await Promise.race([watchedPage, delay(LIMIT_MS).then(() => null)]);
+      if (generation !== this.generation) return;
+      const events = [...eventsOf(fetched), ...(watched ? eventsOf(watched) : [])].filter((event) => shownAsNotification(event, me, watches));
       await this.ingest(events);
       this.advance(eventsOf(fetched), fetched.complete);
+      if (watched) this.advanceWatched(eventsOf(watched), watched.complete);
+      // お知らせの分がまださかのぼれるあいだは「過去の通知を読み込む」を残す
+      if (this.finished && watches.length > 0 && !this.watchDone && this.events.size < MAX_EVENTS) this.finished = false;
       if (this.events.size >= MAX_EVENTS) {
         this.message = "最新500件を表示しています";
         this.finished = true;
-      } else if (!fetched.complete) this.message = "一部のリレーから取得できませんでした。";
+      } else if (!fetched.complete || (watched && !watched.complete)) this.message = "一部のリレーから取得できませんでした。";
     } finally {
       if (generation === this.generation) this.loading = false;
     }
@@ -216,6 +274,24 @@ class Notifications {
     const [ownResult, routedResult] = await Promise.all([own, routed]);
     // 完了かどうかは読み込みリレーの分で決める
     return { ...merge([ownResult, routedResult]), complete: ownResult.complete };
+  }
+
+  /** お知らせに出す人の投稿を、その人たちの書き込みリレーから読む（選んだ時刻より前は読まない）。 */
+  private async fetchWatched(watches: WatchRule[], onEvent: (event: Event) => void): Promise<Fetched | null> {
+    const since = watchSince(watches);
+    if (since === null || this.watchDone || (this.watchUntil !== undefined && this.watchUntil < since)) return null;
+    const filter: Filter = { kinds: WATCH_KINDS, since, limit: 100, ...(this.watchUntil !== undefined ? { until: this.watchUntil } : {}) };
+    return fetchFromAuthors(watches.map((rule) => rule.pubkey), filter, viewer.alwaysOn, onEvent);
+  }
+
+  private advanceWatched(events: Event[], complete: boolean) {
+    if (!complete) return;
+    if (events.length === 0) {
+      this.watchDone = true;
+      return;
+    }
+    const oldest = Math.min(...events.map((event) => event.created_at));
+    this.watchUntil = oldest - 1;
   }
 
   /** さかのぼり方（技術資料 4.3.1 と同じ）。 */
@@ -242,7 +318,14 @@ class Notifications {
     const me = this.owner;
     if (!me) return;
     this.stopLive?.();
-    this.stopLive = pool.subscribe(viewer.readRelays, [{ kinds: NOTIFICATION_KINDS, "#p": [me], since, limit: 50 }], (event) => this.queue(event));
+    const own = pool.subscribe(viewer.readRelays, [{ kinds: NOTIFICATION_KINDS, "#p": [me], since, limit: 50 }], (event) => this.queue(event));
+    // お知らせに出す人は、その人たちの書き込みリレーで購読する
+    const watched = this.watches.map((rule) => rule.pubkey);
+    const others = watched.length > 0 ? subscribeAuthors(watched, { kinds: WATCH_KINDS, since, limit: 50 }, viewer.alwaysOn, (event) => this.queue(event)) : undefined;
+    this.stopLive = () => {
+      own();
+      others?.();
+    };
   }
 
   /** 届いたものは 0.4 秒ためてから入れる。 */
@@ -253,7 +336,10 @@ class Notifications {
       const events = this.buffer;
       this.buffer = [];
       const me = this.owner;
-      if (me) void this.ingest(events.filter((e) => eligible(e, me)));
+      if (me) {
+        const watches = this.watches;
+        void this.ingest(events.filter((e) => shownAsNotification(e, me, watches)));
+      }
     }, 400);
   }
 
@@ -283,7 +369,7 @@ class Notifications {
     const targets = events.map(notificationTarget).map((id) => (id ? notes.get(id) : undefined)).filter((event): event is Event => !!event);
     requestProfiles(targets.map((event) => event.pubkey));
     // あなたのリアクションへのリアクション: リアクションした先の投稿も、その作者のリレーから読む
-    const reacted = targets.filter((event) => event.kind === 7).map(reactedTo).filter((ref) => !!ref && !notes.has(ref.id)).slice(0, 50);
+    const reacted = targets.filter((event) => isInteraction(event.kind)).map(reactedTo).filter((ref) => !!ref && !notes.has(ref.id)).slice(0, 50);
     const byAuthor = new Map<string, string[]>();
     for (const ref of reacted) byAuthor.set(ref!.author ?? me, [...(byAuthor.get(ref!.author ?? me) ?? []), ref!.id]);
     await Promise.all([...byAuthor].map(async ([author, ids]) => {

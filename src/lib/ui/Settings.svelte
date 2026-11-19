@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { PEUSA_LEVELS, PEUSA_PARTS } from "../domain/peusaParts";
   import { peusa } from "../store/peusa.svelte";
   import { nip19 } from "nostr-tools";
   import { UPLOAD_SERVERS } from "../domain/media";
@@ -6,7 +7,6 @@
   import { DEFAULT_RELAYS } from "../nostr/outbox";
   import { normalizeRelay } from "../nostr/relayUrl";
   import { publishRelayList, relayDraft, RelayListChanged } from "../store/relayList.svelte";
-  import { dms } from "../store/dm.svelte";
   import { summary } from "../store/publishSummary";
   import { remoteState } from "../nostr/remoteSigner";
   import { relayHref, SETTINGS_TITLES, type SettingsPage } from "../router.svelte";
@@ -20,7 +20,6 @@
   import { viewer } from "../store/viewer.svelte";
   import BunkerLogin from "./BunkerLogin.svelte";
   import UnicodeEmojiPicker from "./UnicodeEmojiPicker.svelte";
-  import { loadOwnBlossomServers, publishBlossomServers } from "../store/blossomServers.svelte";
   import Avatar from "./Avatar.svelte";
   import { displayName, requestProfiles } from "../store/cache.svelte";
   import { pool } from "../nostr/pool";
@@ -125,32 +124,6 @@
     }
   }
 
-  // ---- DM 受信リレー（kind 10050）
-  let inboxText = $state("");
-  let inboxMessage = $state<string | null>(null);
-  let inboxLoaded = $state(false);
-  let inboxBusy = $state(false);
-  $effect(() => {
-    if (page !== "relays" || inboxLoaded || !viewer.canSign || !viewer.ready) return;
-    inboxLoaded = true;
-    void dms.loadInbox(true).then(({ relays, complete }) => {
-      inboxText = relays.join(NEWLINE);
-      if (!complete) inboxMessage = "今の DM 受信リレーを読み切れませんでした（このままでは公開できません）。";
-    });
-  });
-
-  async function publishInbox() {
-    inboxBusy = true;
-    inboxMessage = "公開しています…";
-    try {
-      inboxMessage = summary(await dms.publishInbox(inboxText.split(NEWLINE).map((line) => line.trim()).filter(Boolean)));
-    } catch (e) {
-      inboxMessage = e instanceof Error ? e.message : String(e);
-    } finally {
-      inboxBusy = false;
-    }
-  }
-
   // ---- リレー（このブラウザだけの設定）
   let searchText = $state(searchRelays(viewer.pubkey).join(NEWLINE));
   let searchMessage = $state<string | null>(null);
@@ -193,30 +166,6 @@
   $effect(() => {
     if (page === "account") requestProfiles(viewer.accounts.map((a) => a.pubkey));
   });
-  let blossomList = $state<string | null>(null);
-  let blossomBusy = $state(false);
-  let blossomMessage = $state<string | null>(null);
-  async function loadBlossomList() {
-    blossomMessage = "読み込んでいます…";
-    try {
-      const servers = await loadOwnBlossomServers();
-      blossomList = (servers.length > 0 ? servers : [uploadChoice]).join(NEWLINE);
-      blossomMessage = servers.length > 0 ? null : "まだ公開していません。今の投稿先を入れました。";
-    } catch (e) {
-      blossomMessage = e instanceof Error ? e.message : String(e);
-    }
-  }
-  async function sendBlossomList() {
-    blossomBusy = true;
-    try {
-      const result = await publishBlossomServers((blossomList ?? "").split(NEWLINE));
-      blossomMessage = result.accepted > 0 ? `Blossomサーバー一覧を公開しました（${summary(result)}）` : summary(result);
-    } catch (e) {
-      blossomMessage = e instanceof Error ? e.message : String(e);
-    } finally {
-      blossomBusy = false;
-    }
-  }
   let customServer = $state("");
   let serverMessage = $state<string | null>(null);
 
@@ -380,6 +329,13 @@
           <button type="button" role="radio" aria-checked={viewer.activeLimit === value} class:active={viewer.activeLimit === value} onclick={() => { viewer.setActiveLimit(value); void home.following?.start(); void home.global?.start(); }}>{value}</button>
         {/each}
       </div>
+      <h3>フォロー中の読み方</h3>
+      <p class="muted">「フォローしている人のリレーからも読む」では、読み込みリレーに加えて、フォローしている人が公開した書き込みリレー（アウトボックス）のうち、人数の多い 12 か所にもつなぎます。投稿を拾いやすくなる代わりに、通信量と接続が増えます。「自分の読み取りリレーだけ」では、フォロー中の投稿と、その人たちの名前・ステータスを、常時接続の読み込みリレー（と、自分の投稿のため自分の書き込みリレー）だけから読みます。プロフィールやスレッドなど、1 人の投稿を読むときは、どちらでもその人のリレーを使います。選ぶとすぐに保存して読み直します。</p>
+      <div class="segmented" role="radiogroup" aria-label="フォロー中の読み方">
+        {#each [[true, "フォローしている人のリレーからも読む"], [false, "自分の読み取りリレーだけ"]] as const as [value, text] (text)}
+          <button type="button" role="radio" aria-checked={viewer.followOutbox === value} class:active={viewer.followOutbox === value} onclick={() => { if (viewer.followOutbox !== value) { viewer.setFollowOutbox(value); void home.following?.start(); } }}>{text}</button>
+        {/each}
+      </div>
       <h3>接続の状況</h3>
       <p class="muted">常時接続 {Math.min(viewer.activeLimit, viewer.readRelays.length)}件 / ほかに使うリレー {Math.max(0, statusRelays.length - Math.min(viewer.activeLimit, viewer.readRelays.length))}件</p>
       <ul class="relay-status">
@@ -438,15 +394,6 @@
       {:else}
         <p class="muted">見るだけのアカウントでは公開できません。</p>
       {/if}
-      {#if viewer.canSign}
-        <h3>DM 受信リレー</h3>
-        <p class="muted">NIP-17 の DM を受け取るリレー（kind 10050）です。1 行に 1 件、3 件まで。公開すると、相手はここへ DM を送ります。</p>
-        <textarea bind:value={inboxText} rows="3" spellcheck="false" aria-label="DM 受信リレー"></textarea>
-        <div class="actions">
-          <button type="button" class="outline" disabled={inboxBusy} onclick={publishInbox}>DM 受信リレーを公開</button>
-          {#if inboxMessage}<span class="muted">{inboxMessage}</span>{/if}
-        </div>
-      {/if}
       <h3>グローバルで読むリレー</h3>
       <p class="muted">ホームの「グローバル」で読むリレーです。1 行に 1 件、12 件まで。空なら読み込みリレーから読みます。このブラウザだけに保存し、リレーリスト（kind 10002）には載せません。変えると、グローバルの保存分は消します。</p>
       <textarea bind:value={globalText} rows="3" spellcheck="false" aria-label="グローバルで読むリレー"></textarea>
@@ -482,17 +429,6 @@
         <button type="button" class="outline" onclick={() => chooseServer(customServer)}>使う</button>
       </div>
       {#if serverMessage}<p class="muted">{serverMessage}</p>{/if}
-      {#if viewer.canSign}
-        <h3>Blossomサーバー一覧（kind 10063）</h3>
-        <p class="muted">公開すると、ほかのアプリが、あなたの画像を読めないときにこれらのサーバーから探します。1 行に 1 つ、https のサーバーを 12 件まで。</p>
-        {#if blossomList === null}
-          <button type="button" class="outline" onclick={loadBlossomList}>今の一覧を読む</button>
-        {:else}
-          <textarea class="servers" rows="4" bind:value={blossomList} aria-label="Blossomサーバー一覧"></textarea>
-          <div class="actions"><button type="button" class="outline" disabled={blossomBusy} onclick={sendBlossomList}>一覧を公開</button></div>
-        {/if}
-        {#if blossomMessage}<p class="muted">{blossomMessage}</p>{/if}
-      {/if}
 
     {:else if page === "reactions"}
       <h3>1タップリアクション</h3>
@@ -549,8 +485,16 @@
       {@render switchRow("センシティブ投稿を常に表示", settings.revealSensitive, (value) => (settings.revealSensitive = value))}
       {#if settings.peusaUnlocked}
         <h3>スーパーぺぇうさモード</h3>
-        {@render switchRow("スーパーぺぇうさモード", settings.peusaMode, (value) => (settings.peusaMode = value), "オンの間は、ぺぇうさの色になり、あちこちにぺぇうさが出てきます（このブラウザの画面だけで、ほかの人からの見え方は変わりません）。強さは、弱：アイコンはそのまま、中：みんなのアイコンがぺぇうさ（自分は季節のぺぇうさ）、強：チャンネルや画面下のタブ・メニューのアイコンもぺぇうさになり、画面の端からぺぇうさがのぞき、押すと水色のハートが飛び散ります。")}
-        {#if settings.peusaMode}{@render segmented("ぺぇうさモードの強さ", [["weak", "弱"], ["medium", "中"], ["strong", "強"]], settings.peusaLevel, (value) => (settings.peusaLevel = value as typeof settings.peusaLevel))}{/if}
+        {@render switchRow("スーパーぺぇうさモード", settings.peusaMode, (value) => (settings.peusaMode = value), "オンの間は、ぺぇうさの色になり、あちこちにぺぇうさが出てきます（このブラウザの画面だけで、ほかの人からの見え方は変わりません）。強さは、弱：アイコンはそのまま、中：みんなのアイコンがぺぇうさ（自分は季節のぺぇうさ）、強：チャンネルや画面下のタブ・メニューのアイコンもぺぇうさになり、画面の端からぺぇうさがのぞき、押すと水色のハートが飛び散ります。かすたむでは、出すところを一つずつ選べます。")}
+        {#if settings.peusaMode}{@render segmented("ぺぇうさモードの強さ", PEUSA_LEVELS, settings.peusaLevel, (value) => (settings.peusaLevel = value as typeof settings.peusaLevel))}{/if}
+        {#if settings.peusaMode && settings.peusaLevel === "custom"}
+          <!-- かすたむ: 出すところを一つずつ選ぶ（Android 版と同じ部品） -->
+          <div data-testid="peusa-custom">
+            {#each PEUSA_PARTS as part (part.id)}
+              {@render switchRow(part.label, settings.peusaCustom.includes(part.id), (on) => (settings.peusaCustom = on ? [...settings.peusaCustom, part.id] : settings.peusaCustom.filter((p) => p !== part.id)))}
+            {/each}
+          </div>
+        {/if}
       {/if}
 
     {:else if page === "theme"}
@@ -600,7 +544,7 @@
       <ul class="notes">
         <li>ぺにょったーは、作者や作者のサーバーに情報を送りません。利用状況の収集や広告もありません。</li>
         <li>このページは Cloudflare Pages から配信しています。ページを開いたときの通信（IP アドレスなど）は Cloudflare に届きます。</li>
-        <li>通信するのは、リレー、表示する投稿の作者が使うリレー、画像投稿先、表示する画像やリンク先、NIP-05 の確認先などです。通信先には、IP アドレスなどが伝わります。</li>
+        <li>通信するのは、リレー、表示する投稿の作者が使うリレー、画像投稿先、表示する画像やリンク先、NIP-05 の確認先、zap のときと自分の Lightning アドレスのサーバー（届いた zap を確かめるため）などです。通信先には、IP アドレスなどが伝わります。</li>
         <li>秘密鍵はこのブラウザに置きません。署名はブラウザ拡張（NIP-07）かリモート署名（NIP-46）に頼みます。</li>
         <li>投稿には初めから「ぺにょったーから投稿」というクライアント情報（NIP-89）が付きます。設定で外せます。</li>
         <li>書きかけ・一覧の履歴・保存分は、このブラウザの中にだけ保存されます。</li>
@@ -691,16 +635,6 @@
     margin: 4px 0;
     padding-left: 20px;
     font-size: 0.9em;
-  }
-  .servers {
-    width: 100%;
-    box-sizing: border-box;
-    font: inherit;
-    padding: 6px 8px;
-    color: var(--text);
-    background: var(--background);
-    border: 1px solid var(--outline);
-    border-radius: 8px;
   }
   .danger-row {
     color: #c33 !important;

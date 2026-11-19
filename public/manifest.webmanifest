@@ -33,5 +33,14 @@
       "protocol": "web+nostr",
       "url": "./#/open?uri=%s"
     }
-  ]
+  ],
+  "share_target": {
+    "action": "./",
+    "method": "GET",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url"
+    }
+  }
 }

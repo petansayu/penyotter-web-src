@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { peusaOn } from "../store/peusa.svelte";
   import { settings } from "../store/settings.svelte";
   import PeusaEmpty from "./PeusaEmpty.svelte";
   import PeusaLoading from "./PeusaLoading.svelte";
@@ -40,6 +41,9 @@
       follows: notifications.following ? new Set(viewer.follows) : null,
       muted: viewer.mutedPubkeys,
       mutedNotes: viewer.mutedEvents,
+      words: { words: viewer.mutedWords, hashtags: viewer.mutedHashtags },
+      zapIssuer: notifications.zapIssuer,
+      watches: notifications.watches,
       separate,
     });
   });
@@ -79,6 +83,7 @@
     <button type="button" class="chip" class:active={!notifications.following} onclick={() => choose(undefined, false)}>グローバル</button>
     <button type="button" class="icon" onclick={() => notifications.refresh()} disabled={notifications.loading} aria-label="再取得" title="再取得"><Icon name="refresh" size={20} /></button>
     <button type="button" class="icon" onclick={() => notifications.markAllRead()} disabled={notifications.unread === 0} aria-label="すべて既読" title="すべて既読"><Icon name="doneAll" size={20} /></button>
+    <a class="icon" href="#/post-watch" aria-label="投稿のお知らせ" title="投稿のお知らせ"><Icon name="tune" size={20} /></a>
   </div>
   <div class="row types">
     {#each NOTIFICATION_TYPES as { type, label } (type)}
@@ -94,7 +99,7 @@
 {#each shown as group (group.key)}
   <div class="item"><NotificationCard {group} {me} /></div>
 {:else}
-  {#if settings.peusaMode}
+  {#if peusaOn("placeholders")}
     {#if notifications.loading}<PeusaLoading size={96} />{:else}<PeusaEmpty picture="empty-notifications" message="取得済みの通知はありません" />{/if}
   {:else}
     <p class="note">{notifications.loading ? "通知を読み込んでいます" : "取得済みの通知はありません"}</p>

@@ -1,4 +1,5 @@
 import { emojis } from "./emojis.svelte";
+import { parsePrivateTags } from "../domain/muteRules";
 import type { EventTemplate } from "nostr-tools";
 import { confirmReason, diffTags, nextList, restoreList, suspiciousDrop, tagKey, withoutTag, withTag, type ConfirmReason, type ListDiff, type RestoreMode, withPetname } from "../domain/lists";
 import { latest, newer, type Event, type Filter } from "../nostr/events";
@@ -97,7 +98,7 @@ class Lists {
   }
 
   unmuteUser(pubkey: string) {
-    return this.change(10000, (tags) => withoutTag(tags, "p", pubkey), true);
+    return this.unmute("p", pubkey);
   }
 
   mutePost(id: string) {
@@ -105,7 +106,32 @@ class Lists {
   }
 
   unmutePost(id: string) {
-    return this.change(10000, (tags) => withoutTag(tags, "e", id), true);
+    return this.unmute("e", id);
+  }
+
+  /**
+   * ミュートを解く。非公開の分（content）にあれば、それも抜いて自分宛てに暗号化し直す（NIP-44。Android 版の
+   * MuteService と同じ）。非公開の分を読めないときは content をそのまま残す。
+   */
+  private unmute(name: "p" | "e", value: string) {
+    return this.run(10000, async (base) => {
+      const tags = withoutTag(base ? base.tags.map((tag) => [...tag]) : [], name, value);
+      let content = base?.content ?? "";
+      if (base && content) {
+        const signer = await viewer.getSigner();
+        let hidden: string[][] | null = null;
+        try {
+          hidden = parsePrivateTags(content.includes("?iv=") ? await signer.nip04Decrypt(base.pubkey, content) : await signer.nip44Decrypt(base.pubkey, content));
+        } catch {
+          hidden = null;
+        }
+        if (hidden && hidden.some((tag) => tag[0] === name && tag[1] === value)) {
+          const remaining = withoutTag(hidden, name, value);
+          content = remaining.length > 0 ? await signer.nip44Encrypt(base.pubkey, JSON.stringify(remaining)) : "";
+        }
+      }
+      return nextList(10000, base, tags, now(), content);
+    }, true, "local");
   }
 
   /** ブックマークに足す（記事など書き直せる投稿はアドレス `a`、それ以外は ID `e`）。 */
@@ -155,7 +181,7 @@ class Lists {
     return this.run(kind, (base) => nextList(kind, base, edit(base ? base.tags.map((tag) => [...tag]) : []), now()), single, "local");
   }
 
-  private async run(kind: ListKind, build: (base: Event | undefined) => EventTemplate, single: boolean, baseSource: HistorySource): Promise<boolean> {
+  private async run(kind: ListKind, build: (base: Event | undefined) => EventTemplate | Promise<EventTemplate>, single: boolean, baseSource: HistorySource): Promise<boolean> {
     const me = viewer.pubkey;
     if (!me || !viewer.canSign) return false;
     const key = `${me}:${kind}`;
@@ -177,7 +203,7 @@ class Lists {
   }
 
   /** 書き換えの本体（技術資料 7.1）。確認で「やめる」なら null。 */
-  private async apply(me: string, kind: ListKind, build: (base: Event | undefined) => EventTemplate, single: boolean, baseSource: HistorySource): Promise<PublishResult | null> {
+  private async apply(me: string, kind: ListKind, build: (base: Event | undefined) => EventTemplate | Promise<EventTemplate>, single: boolean, baseSource: HistorySource): Promise<PublishResult | null> {
     const name = LIST_NAMES[kind];
     // 1. 読み込み＋書き込みリレーから取り直す。完了しなければやめる（取れなかったことを「ない」と取り違えない）
     const relays = relaySet([...viewer.readRelays, ...viewer.writeRelays]);
@@ -194,7 +220,7 @@ class Lists {
       throw new Error("一覧の履歴をこのブラウザに保存できなかったので、変更をやめました。");
     }
     // 4. 変更を当てる。送信待ちと同じ中身になるなら、署名し直さずに送り直す
-    const template = build(base);
+    const template = await build(base);
     const same = pending && base === pending && sameTags(pending.tags, template.tags) && pending.content === template.content;
     // 5. 危ない変更は先に聞く
     // 最初のバッジを飾るときは一覧を作るのが当たり前なので聞かない（Android 版と同じ）
@@ -252,7 +278,7 @@ class Lists {
  * 書き換える前の取り直し（Android 版の LatestPages）。リレーは一時的に REQ を断ったり（日本のリレーは同時の REQ が
  * 10 前後を超えると閉じる）遅れたりするので、そろわなければ少し待って 3 回まで聞き直す。途中で届いた分は残す。
  */
-async function fetchLatest(relays: string[], filters: Filter[]): Promise<Fetched> {
+export async function fetchLatest(relays: string[], filters: Filter[]): Promise<Fetched> {
   const events: Fetched["events"] = new Map();
   for (let attempt = 0; attempt < 3; attempt++) {
     if (attempt > 0) await delay(1500 * attempt);

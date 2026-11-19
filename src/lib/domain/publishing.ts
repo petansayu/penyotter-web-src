@@ -3,7 +3,7 @@ import { nip19, type EventTemplate } from "nostr-tools";
 import { isHex64, tagValue, type Event } from "../nostr/events";
 import { address } from "./threads";
 import { emojiTag, type CustomEmoji } from "./emojis";
-import { imetaTags, MAX_ATTACHMENTS, withAttachments, type Attachment } from "./media";
+import { buildMediaPost, imetaTags, MAX_ATTACHMENTS, withAttachments, type Attachment } from "./media";
 
 /** 投稿するイベントの組み立て（Android 版の PostBuilder・PenyotterClient、技術資料 6.1〜6.5）。 */
 
@@ -27,19 +27,7 @@ export interface Draft {
   customEmojis?: CustomEmoji[];
   /** 注意書き（NIP-36、200 文字まで）。 */
   contentWarning?: string | null;
-  /** 消える投稿（NIP-40）。何秒後に消えるか。 */
-  expiresAfter?: number | null;
 }
-
-/** 消える投稿の選択肢（Android 版の Expiration.choices と同じ）。 */
-export const EXPIRATION_CHOICES: { label: string; seconds: number }[] = [
-  { label: "1時間", seconds: 3600 },
-  { label: "1日", seconds: 86400 },
-  { label: "3日", seconds: 3 * 86400 },
-  { label: "1週間", seconds: 7 * 86400 },
-];
-export const expirationLabel = (seconds: number | null | undefined) =>
-  seconds ? EXPIRATION_CHOICES.find((c) => c.seconds === seconds)?.label ?? `${Math.floor(seconds / 3600)}時間` : null;
 
 /** 1 つの投稿に付けるカスタム絵文字の種類の上限（Android 版と同じ）。 */
 export const MAX_CUSTOM_EMOJIS = 50;
@@ -104,7 +92,8 @@ export function buildEvent(author: string, draft: Draft, now: number, options: {
     if (target.kind === 1) {
       // NIP-10: 根と返信先に印を付ける
       const refs = target.tags.filter((t) => t.length >= 2 && t[0] === "e" && isHex64(t[1]));
-      const root = refs.find((t) => t[3] === "root") ?? refs.find((t) => t.length < 4 || !t[3]);
+      // 根への直接の返信に "reply" の印だけを付けるアプリもある（Android 版と同じ）
+      const root = refs.find((t) => t[3] === "root") ?? refs.find((t) => t.length < 4 || !t[3]) ?? refs.find((t) => t[3] === "reply");
       const rootId = root?.[1] ?? target.id;
       const rootAuthor = isHex64(root?.[4]) ? root![4] : rootId === target.id ? target.pubkey : "";
       tags.push(["e", rootId, root?.[2] ?? "", "root", rootAuthor]);
@@ -154,8 +143,6 @@ export function buildEvent(author: string, draft: Draft, now: number, options: {
       tags.push(emojiTag(emoji));
     }
   }
-  // 消える投稿（NIP-40）。リアクションには使わない
-  if (draft.mode !== "like" && draft.expiresAfter && draft.expiresAfter > 0) tags.push(["expiration", String(now + draft.expiresAfter)]);
   // 件名（NIP-14）は返信で「Re: 」を付けて引き継ぐ
   if (draft.mode === "reply" && target) {
     const subject = tagValue(target, "subject")?.trim();
@@ -165,6 +152,49 @@ export function buildEvent(author: string, draft: Draft, now: number, options: {
   const kind = draft.mode === "like" ? 7 : draft.mode === "reply" && target?.kind !== 1 ? 1111 : 1;
   if ((options.clientTag ?? true) && CLIENT_KINDS.has(kind) && !tags.some((t) => t[0] === "client")) tags.push([...CLIENT_TAG]);
   return { kind, created_at: now, tags, content };
+}
+
+/**
+ * 画像・動画形式の投稿（kind 20・21・22）。imeta などは buildMediaPost が書き、注意書き・ハッシュタグ・メンション・
+ * 引用・絵文字のタグは普通の投稿と同じに付ける（Android 版の PostBuilder と同じ。前は落ちていた）。
+ */
+export function buildMediaEvent(author: string, kind: number, draft: Omit<Draft, "mode" | "target" | "emoji">, now: number, options: { clientTag?: boolean } = {}): EventTemplate {
+  const media = draft.media ?? [];
+  const post = buildMediaPost(kind, draft.body, media, now);
+  const common = buildEvent(author, { ...draft, mode: "post" }, now, options).tags.filter((tag) => tag[0] !== "imeta");
+  return { ...post, tags: [...post.tags, ...common] };
+}
+
+/** 送り先に足す相手の人数と、足すリレーの数（Android 版の DeliveryRelays と同じ）。 */
+const DELIVERY_PEOPLE = 5;
+const DELIVERY_EXTRA = 9;
+const INBOX_RELAYS = 3;
+
+/**
+ * 投稿が宛てた人（NIP-65）。返信・引用・リアクションの相手を先に、`p` タグの人（メンション）を続ける。自分は除き、
+ * 長い返信の連なりで全員へ広がらないよう 5 人まで。
+ */
+export function deliveryPeople(target: string | null, tags: string[][], author: string): string[] {
+  const people = [...(target ? [target] : []), ...tags.filter((t) => t.length >= 2 && t[0] === "p" && isHex64(t[1])).map((t) => t[1])];
+  return [...new Set(people)].filter((p) => p !== author).slice(0, DELIVERY_PEOPLE);
+}
+
+/** 書き込みリレーに、それぞれの人の読み込みリレー（wss だけ）を 3 件ずつ、合わせて 9 件まで足す。 */
+export function relaysForPeople(writeRelays: string[], inboxes: string[][]): string[] {
+  const result = [...writeRelays];
+  let extra = 0;
+  for (const inbox of inboxes) {
+    let added = 0;
+    for (const raw of inbox) {
+      const url = raw.trim().replace(/\/+$/, "");
+      if (!url.startsWith("wss://") || result.includes(url)) continue;
+      if (added >= INBOX_RELAYS || extra >= DELIVERY_EXTRA) break;
+      result.push(url);
+      added++;
+      extra++;
+    }
+  }
+  return result;
 }
 
 /** クライアントタグを付ける（対象の kind で、まだないときだけ）。 */
