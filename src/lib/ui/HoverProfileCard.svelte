@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { nip19 } from "nostr-tools";
   import { profileHref } from "../router.svelte";
   import { displayName, profiles, requestProfiles } from "../store/cache.svelte";
   import { lists } from "../store/lists.svelte";
@@ -8,7 +7,7 @@
 
   /**
    * プロフィールのホバーカード（Amethyst を参考に）。マウスでアイコンや名前（data-profile-hover の付いたもの）に
-   * 0.25 秒のせると、近くに小さなプロフィールを出す。フォロー・ミュート・DM もここから。マウスで操作する画面だけで、
+   * 0.25 秒のせると、近くに小さなプロフィールを出す。フォロー・ミュートもここから。マウスで操作する画面だけで、
    * 指で触れたときは出さない（スマホでは今までどおり、押すとプロフィールの画面）。
    */
   const SHOW_MS = 250;
@@ -110,7 +109,6 @@
         {:else}
           <button type="button" class="action filled" disabled={lists.busy.has(3) || !viewer.ready} onclick={() => lists.follow(pubkey!)}>フォローする</button>
         {/if}
-        <a class="action" href="#/messages/{nip19.npubEncode(pubkey)}" onclick={hide}>DM</a>
         <button type="button" class="action" disabled={lists.busy.has(10000) || !viewer.ready} onclick={() => (muted ? lists.unmuteUser(pubkey!) : lists.muteUser(pubkey!))}>{muted ? "ミュートを解除" : "ミュート"}</button>
       {/if}
     </div>

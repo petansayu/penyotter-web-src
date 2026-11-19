@@ -34,19 +34,23 @@
   {#await import("./MutesPanel.svelte") then { default: MutesPanel }}<MutesPanel />{/await}
 {:else if route.name === "history"}
   {#await import("./ListHistoryPanel.svelte") then { default: ListHistoryPanel }}<ListHistoryPanel />{/await}
+{:else if route.name === "postWatch"}
+  {#await import("./PostWatchPanel.svelte") then { default: PostWatchPanel }}<PostWatchPanel />{/await}
 {:else if route.name === "bookmarks"}
   {#await import("./BookmarksPanel.svelte") then { default: BookmarksPanel }}<BookmarksPanel />{/await}
 {:else if route.name === "relay"}
   <!-- 開いたときだけ読み込む画面（本体を小さくするため） -->
   {#key route.url}{#await import("./RelayInfoView.svelte") then { default: RelayInfoView }}<RelayInfoView url={route.url} />{/await}{/key}
+{:else if route.name === "relaySets"}
+  {#key route.identifier}{#await import("./RelaySetsPanel.svelte") then { default: RelaySetsPanel }}<RelaySetsPanel identifier={route.identifier} />{/await}{/key}
+{:else if route.name === "relayFeed"}
+  {#key route.url}{#await import("./RelayFeedView.svelte") then { default: RelayFeedView }}<RelayFeedView url={route.url} />{/await}{/key}
 {:else if route.name === "lists"}
   {#key route.identifier}{#await import("./ListsPanel.svelte") then { default: ListsPanel }}<ListsPanel identifier={route.identifier} />{/await}{/key}
 {:else if route.name === "write"}
   {#key route.identifier}{#await import("./ArticleEditor.svelte") then { default: ArticleEditor }}<ArticleEditor identifier={route.identifier} />{/await}{/key}
 {:else if route.name === "chat"}
   {#key route.channel}{#await import("./ChatPanel.svelte") then { default: ChatPanel }}<ChatPanel channel={route.channel} />{/await}{/key}
-{:else if route.name === "messages"}
-  {#key route.peer}{#await import("./DmPanel.svelte") then { default: DmPanel }}<DmPanel peer={route.peer} />{/await}{/key}
 {:else if route.name === "secretLink"}
   <p class="notice">秘密鍵（nsec・ncryptsec）のリンクは開きません。秘密鍵をリンクで受け取ったり、渡したりしないでください。</p>
 {:else if route.name === "notFound"}

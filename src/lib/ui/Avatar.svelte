@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { peusaAvatars, peusaFace, peusaFaceOf } from "../store/peusa.svelte";
+  import { peusaFace, peusaFaceOf, peusaOn } from "../store/peusa.svelte";
   import { viewer } from "../store/viewer.svelte";
   import { chooseAvatar } from "../avatar/picker";
   import { profiles } from "../store/cache.svelte";
@@ -18,7 +18,7 @@
   const choice = $derived(chooseAvatar(pubkey));
   // スーパーぺぇうさモード（中・強）の間は、このブラウザの画面だけ、自分のアイコンを季節のぺぇうさに、ほかの人の
   // アイコンをぺぇうさのどれか（公開鍵で決める）にする
-  const peusaFaceUrl = $derived(peusaAvatars() ? (pubkey === viewer.pubkey ? peusaFace(new Date().getMonth() + 1) : peusaFaceOf(pubkey)) : null);
+  const peusaFaceUrl = $derived(pubkey === viewer.pubkey ? (peusaOn("ownAvatar") ? peusaFace(new Date().getMonth() + 1) : null) : peusaOn("othersAvatars") ? peusaFaceOf(pubkey) : null);
 </script>
 
 <!-- data-profile-hover: マウスをのせるとプロフィールのホバーカード（HoverProfileCard） -->

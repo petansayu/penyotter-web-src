@@ -1,6 +1,6 @@
 <script lang="ts">
   import { relayDetails, type RelayDetails } from "../nostr/relayInfo";
-  import { profileHref } from "../router.svelte";
+  import { profileHref, relayFeedHref } from "../router.svelte";
   import { viewer } from "../store/viewer.svelte";
 
   /** リレーの情報画面（NIP-11、Android 版の RelayInfoScreen）。このアカウントでの使い方も出す。 */
@@ -28,6 +28,7 @@
     </div>
   </div>
   <p class="usage">このアカウントでの使い方: {usage || "使っていません"}</p>
+  {#if url.startsWith("wss://")}<p class="usage"><a href={relayFeedHref(url)}>このリレーのタイムライン</a></p>{/if}
   {#if details === undefined}
     <p class="muted">読み込んでいます…</p>
   {:else if details === null}

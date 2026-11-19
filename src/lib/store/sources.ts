@@ -18,9 +18,9 @@ export function homeSource(): FeedSource {
   return {
     page: (until, limit, onEvent) => {
       const filter: Filter = { kinds, limit: until === undefined ? 80 : limit, ...(until !== undefined ? { until } : {}) };
-      return fetchFromAuthors(authors(), filter, viewer.alwaysOn, onEvent, 4000, pinned());
+      return fetchFromAuthors(authors(), filter, viewer.alwaysOn, onEvent, 4000, pinned(), viewer.followOutbox);
     },
-    live: (since, onEvent) => subscribeAuthors(authors(), { kinds, since }, viewer.alwaysOn, onEvent, pinned()),
+    live: (since, onEvent) => subscribeAuthors(authors(), { kinds, since }, viewer.alwaysOn, onEvent, pinned(), viewer.followOutbox),
     cacheScope: "home",
   };
 }

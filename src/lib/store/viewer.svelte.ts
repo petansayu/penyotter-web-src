@@ -1,4 +1,5 @@
 import { petnames } from "../domain/lists";
+import { muteRules, parsePrivateTags } from "../domain/muteRules";
 import { nip05, nip19 } from "nostr-tools";
 import { isHex64, latest, type Event } from "../nostr/events";
 import { DEFAULT_RELAYS, INDEXER_RELAYS, loadRelayLists, parseRelayList, relayLists, type RelayList } from "../nostr/outbox";
@@ -52,6 +53,11 @@ class Viewer {
   follows = $state<string[]>([]);
   mutedPubkeys = $state<Set<string>>(new Set());
   mutedEvents = $state<Set<string>>(new Set());
+  /** ミュートした言葉（`word`）とハッシュタグ（`t`）。小文字。 */
+  mutedWords = $state<Set<string>>(new Set());
+  mutedHashtags = $state<Set<string>>(new Set());
+  /** 復号したミュート一覧の非公開の分（イベント ID ごと）。このタブのメモリだけに置き、ブラウザには保存しない。 */
+  private privateMutes = new Map<string, string[][]>();
   /** 今使っているフォロー一覧（kind 3）とミュート一覧（kind 10000）。書き換えの元にはせず、毎回取り直す（lists）。 */
   contactList = $state<Event>();
   muteList = $state<Event>();
@@ -130,7 +136,29 @@ class Viewer {
     }
   }
 
+  /**
+   * フォロー中の読み方（Android 版の followOutbox）。true（最初）はフォローしている人の書き込みリレー（アウトボックス）
+   * からも読む。false は自分の読み取りリレー（常時接続）と、自分の投稿のための自分の書き込みリレーだけ。ホームの
+   * フォロー中と、名前・ステータス・Blossom のまとめ読みに効く。1 人の投稿を読むとき（プロフィール・スレッド）と
+   * 送るときは変えない。見る人ごとにブラウザに保存（`follow-outbox.<公開鍵>`）。
+   */
+  followOutbox = $state(true);
+
+  setFollowOutbox(value: boolean) {
+    this.followOutbox = value;
+    try {
+      if (this.pubkey) localStorage.setItem(`follow-outbox.${this.pubkey}`, value ? "1" : "0");
+    } catch {
+      // 保存できなくてもこの間は使える
+    }
+  }
+
   private readActiveLimit(pubkey: string | null) {
+    try {
+      this.followOutbox = (pubkey ? localStorage.getItem(`follow-outbox.${pubkey}`) : null) !== "0";
+    } catch {
+      this.followOutbox = true;
+    }
     try {
       const saved = Number(pubkey ? localStorage.getItem(`active-relays.${pubkey}`) : NaN);
       this.activeLimit = Number.isInteger(saved) && saved >= 1 && saved <= 12 ? saved : 6;
@@ -245,7 +273,7 @@ class Viewer {
     this.applyBookmarks(undefined);
     try {
       localStorage.removeItem(STORAGE_KEY);
-      if (previous) for (const key of ["notifications", "mute-list", "search-relays", "global-relays", "home-tab", "relay-list", "active-relays", "search-history"]) localStorage.removeItem(`${key}.${previous}`);
+      if (previous) for (const key of ["notifications", "mute-list", "search-relays", "global-relays", "home-tab", "relay-list", "active-relays", "follow-outbox", "search-history", "post-watch"]) localStorage.removeItem(`${key}.${previous}`);
       if (previous) forgetRemote(previous);
     } catch {
       // 何もしない
@@ -331,11 +359,14 @@ class Viewer {
     this.follows = event ? pTags(event) : [];
   }
 
-  /** ミュート一覧を使う。読めるのは公開の分（タグ）だけ（非公開の分は content に暗号化されている）。 */
+  /**
+   * ミュート一覧を使う。公開の分（タグ）をすぐ当て、署名できるときは非公開の分（content を自分宛てに暗号化したタグ）も
+   * 復号して足す（NIP-51。Android 版と同じく、人・投稿・言葉・ハッシュタグ）。
+   */
   applyMutes(event: Event | undefined) {
     this.muteList = event;
-    this.mutedPubkeys = new Set(event ? pTags(event) : []);
-    this.mutedEvents = new Set(event?.tags.filter((tag) => tag[0] === "e" && isHex64(tag[1])).map((tag) => tag[1]) ?? []);
+    this.setMuteRules(event, event ? this.privateMutes.get(event.id) ?? [] : []);
+    if (event) void this.openPrivateMutes(event);
     // 次に開いたとき、リレーから読む前に当てられるように、このブラウザに控える
     const me = this.pubkey;
     if (!me || (event && event.pubkey !== me)) return;
@@ -361,8 +392,29 @@ class Viewer {
     // 控えがなければ空にする（前に見ていた人のミュートを持ち越さない）
     const valid = saved && saved.kind === 10000 && saved.pubkey === pubkey && Array.isArray(saved.tags) ? saved : undefined;
     this.muteList = valid;
-    this.mutedPubkeys = new Set(valid ? pTags(valid) : []);
-    this.mutedEvents = new Set(valid?.tags.filter((tag) => tag[0] === "e" && isHex64(tag[1])).map((tag) => tag[1]) ?? []);
+    this.setMuteRules(valid, valid ? this.privateMutes.get(valid.id) ?? [] : []);
+  }
+
+  private setMuteRules(event: Event | undefined, hidden: string[][]) {
+    const rules = muteRules([...(event?.tags ?? []), ...hidden]);
+    this.mutedPubkeys = rules.pubkeys;
+    this.mutedEvents = rules.events;
+    this.mutedWords = rules.words;
+    this.mutedHashtags = rules.hashtags;
+  }
+
+  /** 自分のミュート一覧の非公開の分を、1 つの版につき 1 回だけ復号して当てる（拡張によっては確認が出る）。 */
+  private async openPrivateMutes(event: Event) {
+    if (!event.content || event.pubkey !== this.pubkey || !this.canSign || this.privateMutes.has(event.id)) return;
+    this.privateMutes.set(event.id, []);
+    try {
+      const signer = await this.getSigner();
+      const plain = event.content.includes("?iv=") ? await signer.nip04Decrypt(event.pubkey, event.content) : await signer.nip44Decrypt(event.pubkey, event.content);
+      this.privateMutes.set(event.id, parsePrivateTags(plain));
+    } catch {
+      return;
+    }
+    if (this.muteList?.id === event.id) this.setMuteRules(event, this.privateMutes.get(event.id) ?? []);
   }
 
   /** 自分の kind 10002・3・10000 を読む（技術資料 5.10。閲覧専用なので取り込むだけ）。 */

@@ -57,7 +57,7 @@
   {#if feed}<Timeline {feed} empty="このリストの人の投稿はありません" />{/if}
 {:else}
   <section class="lists">
-    <h2>リスト</h2>
+    <nav class="tabs"><span class="active">フォローセット</span><a href="#/relaysets">リレーセット</a></nav>
     <p class="muted">自分のフォローセット（NIP-51 の kind 30000）です。選ぶと、その人たちの投稿を出します。</p>
     {#if sets === null}<p class="muted">読み込んでいます…</p>
     {:else if sets.length === 0}<p class="muted">リストがありません</p>
@@ -101,6 +101,20 @@
   }
   small {
     color: var(--muted);
+  }
+  .tabs {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 8px;
+    font-weight: 600;
+  }
+  .tabs a {
+    color: var(--muted);
+    text-decoration: none;
+  }
+  .tabs .active {
+    color: var(--text);
+    border-bottom: 2px solid var(--primary);
   }
   .back {
     color: var(--primary);

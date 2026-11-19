@@ -24,6 +24,11 @@ describe("何人分かを読むときのリレーの選び方（4.4.3）", () =>
     expect(plans.filter((p) => p.relay === "wss://popular.test" && p.authors.includes(me))).toHaveLength(1);
     expect(planAuthors([...people, me], [{ author: me, relays: ["wss://mine.test"] }, { author: me, relays: ["wss://mine.test"] }]).filter((p) => p.relay === "wss://mine.test")).toHaveLength(1);
   });
+
+  it("「自分の読み取りリレーだけ」（routed が false）なら、相手のリレーへはつながず、pinned だけ（Android 版と同じ）", () => {
+    expect(planAuthors([...people, me], [{ author: me, relays: ["wss://mine.test"] }], false)).toEqual([{ relay: "wss://mine.test", authors: [me] }]);
+    expect(planAuthors([...people, me], [], false)).toEqual([]);
+  });
 });
 
 describe("500 人より多くフォローしている人", () => {

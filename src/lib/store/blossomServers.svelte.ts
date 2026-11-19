@@ -1,8 +1,8 @@
 import { SvelteMap } from "svelte/reactivity";
-import { blossomServersOf, buildBlossomServers } from "../domain/media";
+import { blossomServersOf } from "../domain/media";
 import { latest, type Event } from "../nostr/events";
 import { fetchFromAuthors } from "../nostr/outbox";
-import { eventsOf, pool, publish, type PublishResult } from "../nostr/pool";
+import { eventsOf, pool } from "../nostr/pool";
 import { relaySet } from "../nostr/relayUrl";
 import { viewer } from "./viewer.svelte";
 
@@ -34,7 +34,7 @@ export function requestBlossomServers(pubkey: string) {
     timer = undefined;
     const batch = [...queue];
     queue = new Set();
-    for (let i = 0; i < batch.length; i += 80) void fetchFromAuthors(batch.slice(i, i + 80), { kinds: [10063] }, viewer.alwaysOn, keep, 200);
+    for (let i = 0; i < batch.length; i += 80) void fetchFromAuthors(batch.slice(i, i + 80), { kinds: [10063] }, viewer.alwaysOn, keep, 200, [], viewer.followOutbox);
   }, 300);
 }
 
@@ -44,14 +44,4 @@ export async function loadOwnBlossomServers(): Promise<string[]> {
   const event = latest(eventsOf(await pool.fetch(relaySet([...viewer.readRelays, ...viewer.writeRelays]), [{ kinds: [10063], authors: [me], limit: 5 }])));
   if (event) keep(event);
   return event ? blossomServersOf(event.tags) : [];
-}
-
-/** 自分の一覧を公開する（書き込みリレーへ）。 */
-export async function publishBlossomServers(servers: string[]): Promise<PublishResult> {
-  if (!viewer.pubkey || !viewer.canSign) throw new Error("署名できるアカウントでログインしてください");
-  const signer = await viewer.getSigner();
-  const event = await signer.sign(buildBlossomServers(servers, Math.floor(Date.now() / 1000)));
-  const result = await publish(viewer.writeRelays, event);
-  if (result.accepted > 0) keep(event);
-  return result;
 }

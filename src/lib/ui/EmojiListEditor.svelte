@@ -3,6 +3,11 @@
   import { setReferences } from "../domain/emojis";
   import { emojis } from "../store/emojis.svelte";
   import { lists } from "../store/lists.svelte";
+  import { packIdentifier, packTitle, suggestedShortcode } from "../domain/emojiPackEditing";
+  import { myEmojiPacks } from "../store/myEmojiPacks.svelte";
+  import { uploadFile } from "../store/upload";
+  import { viewer } from "../store/viewer.svelte";
+  import EmojiPackEditor from "./EmojiPackEditor.svelte";
 
   /**
    * 絵文字リスト（kind 10030）の編集（Android 版の EmojiListEditor）。直接の絵文字（shortcode と https の画像）と、
@@ -15,6 +20,27 @@
   let url = $state("");
   let address = $state("");
   let error = $state<string | null>(null);
+  let uploading = $state(false);
+  let picker = $state<HTMLInputElement>();
+  let packsOpen = $state(false);
+  /** 自分のパックの名前（識別子ごと）。絵文字セットの一覧で、識別子の代わりに出す。 */
+  const ownTitles = $derived(new Map(myEmojiPacks.packs.map((p) => [packIdentifier(p.tags) ?? "", packTitle(p)])));
+
+  /** 画像を選んで、設定の画像投稿先へアップロードし、名前の候補をファイル名から入れる（Android 版と同じ）。 */
+  async function upload(files: FileList | null) {
+    const file = files?.[0];
+    if (!file) return;
+    uploading = true;
+    error = null;
+    try {
+      url = (await uploadFile(file)).url;
+      if (!shortcode.trim()) shortcode = suggestedShortcode(file.name);
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+    } finally {
+      uploading = false;
+    }
+  }
 
   const direct = $derived((emojis.listEvent?.tags ?? []).filter((t) => t[0] === "emoji" && t[1] && t[2]));
   const sets = $derived(emojis.listEvent ? setReferences(emojis.listEvent) : []);
@@ -24,6 +50,7 @@
   onMount(() => {
     dialog?.showModal();
     void emojis.reload();
+    void myEmojiPacks.load();
   });
 
   async function addEmoji() {
@@ -56,6 +83,10 @@
 <dialog bind:this={dialog} onclose={close} aria-label="絵文字リストを編集" onclick={(event) => event.stopPropagation()} onkeydown={(event) => event.stopPropagation()}>
   <h3>絵文字リストを編集</h3>
   <h4>直接の絵文字</h4>
+  <input bind:this={picker} type="file" accept="image/*" hidden onchange={(event) => { void upload(event.currentTarget.files); event.currentTarget.value = ""; }} />
+  <div class="row">
+    <button type="button" disabled={busy || uploading} onclick={() => picker?.click()}>{uploading ? "アップロードしています…" : "画像を選んでアップロード"}</button>
+  </div>
   <div class="row">
     <input bind:value={shortcode} placeholder="shortcode（例: party_cat）" aria-label="shortcode" />
     <input bind:value={url} placeholder="https://…" aria-label="HTTPS の画像 URL" />
@@ -73,9 +104,11 @@
   </div>
   <ul>
     {#each sets as set (set.author + set.identifier)}
-      <li><span>{set.identifier}</span><small>{set.author.slice(0, 16)}…</small><button type="button" disabled={busy} onclick={() => lists.removeEmojiSet(`30030:${set.author}:${set.identifier}`)}>削除</button></li>
+      <li><span>{set.author === viewer.pubkey ? ownTitles.get(set.identifier) ?? set.identifier : set.identifier}</span><small>{set.author === viewer.pubkey ? "自分のパック" : `${set.author.slice(0, 16)}…`}</small><button type="button" disabled={busy} onclick={() => lists.removeEmojiSet(`30030:${set.author}:${set.identifier}`)}>削除</button></li>
     {/each}
   </ul>
+  <button type="button" class="packs" onclick={() => (packsOpen = true)}>自分の絵文字パックを作る・編集する</button>
+  {#if packsOpen}<EmojiPackEditor close={() => (packsOpen = false)} />{/if}
   {#if emojis.loading || busy}<p class="muted">{busy ? "絵文字リストを公開しています…" : "読み込んでいます…"}</p>{/if}
   {#if error}<p class="error">{error}</p>{/if}
   <div class="buttons"><button type="button" onclick={() => dialog?.close()}>閉じる</button></div>
@@ -159,6 +192,9 @@
   }
   button:disabled {
     opacity: 0.5;
+  }
+  .packs {
+    margin-top: 8px;
   }
   .buttons {
     display: flex;

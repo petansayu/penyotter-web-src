@@ -6,6 +6,7 @@
 import type { CustomEmoji } from "../domain/emojis";
 import { PEUSA_CLEAR, PEUSA_FACES } from "./peusa-faces";
 import { settings } from "./settings.svelte";
+import type { PeusaPart } from "../domain/peusaParts";
 
 export const peusaPicture = (name: string) => `peusa/${name}.webp`;
 
@@ -37,10 +38,8 @@ export function peusaFaceOf(pubkey: string): string {
   return peusaPicture(PEUSA_FACES[((hash % PEUSA_FACES.length) + PEUSA_FACES.length) % PEUSA_FACES.length]);
 }
 
-/** みんなのアイコンをぺぇうさにするか（モードがオンで、中か強）。 */
-export const peusaAvatars = () => settings.peusaMode && settings.peusaLevel !== "weak";
-/** アプリのアイコン（タブ・メニュー・チャンネル）もぺぇうさにするか（モードがオンで、強）。 */
-export const peusaStrong = () => settings.peusaMode && settings.peusaLevel === "strong";
+/** その部品にぺぇうさを出すか（モードがオンで、いまの強さ・かすたむで選んだ部品に入っているか）。 */
+export const peusaOn = (part: PeusaPart) => settings.peusaParts.has(part);
 
 /**
  * アプリのアイコン（タブ・メニュー）の代わりの、背景を透明にしたぺぇうさ（slot 番目。Android 版の Peusa.clearOf と同じ

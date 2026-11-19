@@ -27,6 +27,7 @@
   import Content from "./Content.svelte";
   import EmbedView from "./EmbedView.svelte";
   import EmojiPicker from "./EmojiPicker.svelte";
+  import { openInteractionMenu } from "../store/interactionMenu.svelte";
   import HiddenMessage from "./HiddenMessage.svelte";
   import Icon from "./Icon.svelte";
   import MediaGrid from "./MediaGrid.svelte";
@@ -109,6 +110,37 @@
   /** 「…」のメニューを開いているか。confirming は削除の確かめ中。 */
   let moreOpen = $state(false);
   let confirming = $state(false);
+  /**
+   * 「…」の中で開いているまとまり（流れを見る・コピー・共有・ミュート）。似た項目はまとめて、同じメニューの中で開く。
+   * 中身が 1 つのまとまりはその項目をそのまま出す（Android 版の PostActions の moreGroup と同じ）。
+   */
+  let moreGroup = $state<string | null>(null);
+  interface MenuEntry { label: string; run: () => void; disabled?: boolean; danger?: boolean }
+  function runEntry(entry: MenuEntry) {
+    moreOpen = false;
+    moreGroup = null;
+    entry.run();
+  }
+  const flowEntries = (): MenuEntry[] => [
+    // 前後の投稿。リポストで出ているときは、リポストした人のその後も
+    { label: "この時点のタイムライン", run: () => navigate(aroundHref(note.id, "following", note.pubkey)) },
+    ...(repost ? [{ label: "リポストした人のその後", run: () => navigate(aroundHref(repost.id, "author", repost.pubkey)) }] : []),
+    // たぶんこの流れ（同じ話題らしい前後の投稿）
+    ...(note.kind === 1 && settings.topicTools ? [{ label: "たぶんこの流れ", run: () => navigate(flowHref(note.id, note.pubkey, home.tab)) }] : []),
+    // 返信なら、返信した人と返信先の人の 2 人のやり取りだけ
+    ...(replyTo && replyTo !== note.pubkey ? [{ label: "この 2 人の会話", run: () => navigate(talkHref(note.pubkey, replyTo)) }] : []),
+  ];
+  const copyEntries = (): MenuEntry[] => [
+    { label: "テキストをコピー", run: () => void copy(note.content, "投稿本文") },
+    { label: "IDをコピー", run: () => void copy(`nostr:${href.replace("#/e/", "")}`, "投稿ID") },
+    { label: "イベントID（16進）をコピー", run: () => void copy(note.id, "イベントID") },
+    ...(typeof navigator.share === "function" ? [{ label: "テキストを共有", run: () => void share() }] : []),
+    { label: "イベントJSONを確認", run: () => jsonDialog?.showModal() },
+  ];
+  const muteEntries = (): MenuEntry[] => viewer.canSign && !mine ? [
+    { label: "この投稿をミュート", run: () => void lists.mutePost(note.id), disabled: lists.busy.has(10000) },
+    { label: `${displayName(note.pubkey)} をミュート`, run: () => void lists.muteUser(note.pubkey), disabled: lists.busy.has(10000) },
+  ] : [];
   let moreAnchor = $state<HTMLElement>();
   let jsonDialog = $state<HTMLDialogElement>();
   let parentState = $state<"loading" | "missing" | null>(null);
@@ -197,43 +229,43 @@
   };
 </script>
 
+{#snippet entryItem(entry: MenuEntry)}
+  <button type="button" role="menuitem" class:danger={entry.danger} disabled={entry.disabled} onclick={() => runEntry(entry)}>{entry.label}</button>
+{/snippet}
+
+{#snippet group(title: string, entries: MenuEntry[])}
+  {#if entries.length === 1}{@render entryItem(entries[0])}
+  {:else if entries.length > 1}<button type="button" role="menuitem" class="group-open" onclick={() => (moreGroup = title)}>{title}<Icon name="chevronRight" size={16} /></button>{/if}
+{/snippet}
+
 {#snippet moreMenu()}
   <span class="more-anchor" bind:this={moreAnchor}>
-    <button type="button" class="action more" onclick={() => { moreOpen = !moreOpen; confirming = false; }} aria-label="投稿のその他操作" aria-haspopup="menu" aria-expanded={moreOpen} title="その他"><Icon name="moreHoriz" size={18} /></button>
+    <button type="button" class="action more" onclick={() => { moreOpen = !moreOpen; confirming = false; moreGroup = null; }} aria-label="投稿のその他操作" aria-haspopup="menu" aria-expanded={moreOpen} title="その他"><Icon name="moreHoriz" size={18} /></button>
     {#if moreOpen}
       <span class="menu more-menu" role="menu">
         {#if confirming}
           <span class="confirm">投稿を削除しますか？ 削除をリレーに依頼します。ほかのアプリやリレーには残ることがあります。</span>
           <button type="button" role="menuitem" class="danger" onclick={() => { moreOpen = false; confirming = false; void actions.deletePost(note); }}>削除する</button>
           <button type="button" role="menuitem" onclick={() => (confirming = false)}>やめる</button>
+        {:else if moreGroup}
+          {@const entries = moreGroup === "流れを見る" ? flowEntries() : moreGroup === "コピー・共有" ? copyEntries() : muteEntries()}
+          <button type="button" role="menuitem" class="group-back" onclick={() => (moreGroup = null)}><Icon name="arrowBack" size={16} />{moreGroup}</button>
+          {#each entries as entry (entry.label)}{@render entryItem(entry)}{/each}
         {:else}
-          <!-- 前後の投稿（Android 版と同じ）。リポストで出ているときは、リポストした人のその後も -->
-          <button type="button" role="menuitem" onclick={() => { moreOpen = false; navigate(aroundHref(note.id, "following", note.pubkey)); }}>この時点のタイムライン</button>
-          {#if repost}<button type="button" role="menuitem" onclick={() => { moreOpen = false; navigate(aroundHref(repost.id, "author", repost.pubkey)); }}>リポストした人のその後</button>{/if}
-          <!-- たぶんこの流れ（同じ話題らしい前後の投稿。Android 版と同じ） -->
-          {#if note.kind === 1 && settings.topicTools}<button type="button" role="menuitem" onclick={() => { moreOpen = false; navigate(flowHref(note.id, note.pubkey, home.tab)); }}>たぶんこの流れ</button>{/if}
-          <!-- 返信なら、返信した人と返信先の人の 2 人のやり取りだけ（Android 版と同じ） -->
-          {#if replyTo && replyTo !== note.pubkey}<button type="button" role="menuitem" onclick={() => { moreOpen = false; navigate(talkHref(note.pubkey, replyTo)); }}>この 2 人の会話</button>{/if}
-          <!-- ブロードキャスト: 署名済みのまま自分の書き込みリレーへ（ほかの人の投稿も。Android 版と同じ） -->
-          {#if viewer.pubkey}<button type="button" role="menuitem" onclick={() => { moreOpen = false; void actions.broadcast(note); }}>ブロードキャスト（書き込みリレーへ送る）</button>{/if}
-          <button type="button" role="menuitem" onclick={() => { moreOpen = false; jsonDialog?.showModal(); }}>イベントJSONを確認</button>
-          <button type="button" role="menuitem" onclick={() => copy(`nostr:${href.replace("#/e/", "")}`, "投稿ID")}>IDをコピー</button>
-          <button type="button" role="menuitem" onclick={() => copy(note.id, "イベントID")}>イベントID（16進）をコピー</button>
-          <button type="button" role="menuitem" onclick={() => copy(note.content, "投稿本文")}>テキストをコピー</button>
-          {#if typeof navigator.share === "function"}<button type="button" role="menuitem" onclick={share}>テキストを共有</button>{/if}
+          {@render group("流れを見る", flowEntries())}
+          {@render group("コピー・共有", copyEntries())}
           {#if viewer.canSign && profiles.get(note.pubkey)?.profile.lud16}
-            <button type="button" role="menuitem" onclick={() => { moreOpen = false; zapping = true; }}>⚡ Zapを送る</button>
+            {@render entryItem({ label: "⚡ Zapを送る", run: () => (zapping = true) })}
           {/if}
           {#if viewer.canSign}
             {@const addressRef = note.kind >= 30000 && note.kind < 40000 ? address(note) : null}
             {@const bookmarked = viewer.bookmarks.has(note.id) || (!!addressRef && viewer.bookmarks.has(addressRef))}
-            <button type="button" role="menuitem" disabled={lists.busy.has(10003)} onclick={() => { moreOpen = false; void (bookmarked ? lists.unbookmark({ id: note.id, address: addressRef }) : lists.bookmark({ id: note.id, address: addressRef })); }}>{bookmarked ? "ブックマークから外す" : "ブックマークに追加"}</button>
+            {@render entryItem({ label: bookmarked ? "ブックマークから外す" : "ブックマークに追加", disabled: lists.busy.has(10003), run: () => void (bookmarked ? lists.unbookmark({ id: note.id, address: addressRef }) : lists.bookmark({ id: note.id, address: addressRef })) })}
           {/if}
-          {#if viewer.canSign && !mine}
-            <button type="button" role="menuitem" disabled={lists.busy.has(10000)} onclick={() => { moreOpen = false; void lists.mutePost(note.id); }}>この投稿をミュート</button>
-            <button type="button" role="menuitem" disabled={lists.busy.has(10000)} onclick={() => { moreOpen = false; void lists.muteUser(note.pubkey); }}>{displayName(note.pubkey)} をミュート</button>
-            <button type="button" role="menuitem" class="danger" onclick={() => { moreOpen = false; reporting = true; }}>通報</button>
-          {/if}
+          {@render group("ミュート", muteEntries())}
+          <!-- ブロードキャスト: 署名済みのまま自分の書き込みリレーへ（ほかの人の投稿も。Android 版と同じ） -->
+          {#if viewer.pubkey}{@render entryItem({ label: "ブロードキャスト（書き込みリレーへ送る）", run: () => void actions.broadcast(note) })}{/if}
+          {#if viewer.canSign && !mine}{@render entryItem({ label: "通報", danger: true, run: () => (reporting = true) })}{/if}
           {#if viewer.canSign && mine && note.kind === 30023}
             <a role="menuitem" class="menu-link" href={writeHref(tagValue(note, "d") ?? "")} onclick={() => (moreOpen = false)}>この記事を編集</a>
           {/if}
@@ -343,6 +375,8 @@
     <div class="repost-row">
       <a class="repost" href={profileHref(repost.pubkey)}><Icon name="repeat" size={16} />{nameOf(repost.pubkey)} がリポスト</a>
       <a class="repost-after" href={aroundHref(repost.id, "author", repost.pubkey)} title="リポストした人のその後">その後</a>
+      <!-- このリポストにリアクション・リポストする（Android 版の「〜がリポスト」の行と同じメニュー） -->
+      <button type="button" class="repost-menu" onclick={() => openInteractionMenu(repost)} aria-label="{nameOf(repost.pubkey)} のリポストの操作" title="このリポストにリアクション・リポストする"><Icon name="moreHoriz" size={16} /></button>
     </div>
   {/if}
   {#if reaction}
@@ -539,6 +573,18 @@
     right: 0;
     min-width: 220px;
   }
+  .menu .group-open,
+  .menu .group-back {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+  }
+  .menu .group-back {
+    justify-content: flex-start;
+    font-weight: 600;
+    border-bottom: 1px solid var(--outline-variant);
+  }
   .menu .danger {
     color: #d33;
   }
@@ -648,6 +694,23 @@
   }
   .repost-row .repost {
     min-width: 0;
+  }
+  .repost-menu {
+    display: grid;
+    flex: none;
+    place-items: center;
+    align-self: center;
+    width: 26px;
+    height: 22px;
+    padding: 0;
+    color: var(--muted);
+    background: none;
+    border: none;
+    border-radius: 11px;
+    cursor: pointer;
+  }
+  .repost-menu:hover {
+    background: var(--surface-low);
   }
   .repost-after {
     flex: none;

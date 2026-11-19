@@ -3,10 +3,12 @@
   import { profileHref, router } from "./lib/router.svelte";
   import { settings } from "./lib/store/settings.svelte";
   import { notifications } from "./lib/store/notifications.svelte";
+  import { profiles } from "./lib/store/cache.svelte";
+  import { pendingShare } from "./lib/store/share.svelte";
+  import { appendShared } from "./lib/domain/share";
   import { actions } from "./lib/store/actions.svelte";
   import { deck } from "./lib/store/deck.svelte";
   import { composer } from "./lib/store/composer.svelte";
-  import { dms } from "./lib/store/dm.svelte";
   import { home } from "./lib/store/home.svelte";
   import { lists } from "./lib/store/lists.svelte";
   import { pwa } from "./lib/store/pwa.svelte";
@@ -18,16 +20,20 @@
   import Icon from "./lib/ui/Icon.svelte";
   import { TEST_RELAY } from "./lib/nostr/testMode";
   import { pool } from "./lib/nostr/pool";
+  import { relaySet } from "./lib/nostr/relayUrl";
+  import { globalRelays } from "./lib/store/global";
+  import { searchRelays } from "./lib/store/search.svelte";
   import RouteView from "./lib/ui/RouteView.svelte";
   import ListConfirmDialog from "./lib/ui/ListConfirmDialog.svelte";
   import EmojiPackSheet from "./lib/ui/EmojiPackSheet.svelte";
+  import InteractionMenu from "./lib/ui/InteractionMenu.svelte";
   import FlowSummary from "./lib/ui/FlowSummary.svelte";
   import HoverProfileCard from "./lib/ui/HoverProfileCard.svelte";
   import JumpDialog from "./lib/ui/JumpDialog.svelte";
   import MiniAppsDialog from "./lib/ui/MiniAppsDialog.svelte";
   import PeusaLayer from "./lib/ui/PeusaLayer.svelte";
   import PeusaMood from "./lib/ui/PeusaMood.svelte";
-  import { peusaFailure, peusaPicture } from "./lib/store/peusa.svelte";
+  import { peusaFailure, peusaOn, peusaPicture } from "./lib/store/peusa.svelte";
   import { jumpDialog } from "./lib/store/jump.svelte";
   import { miniAppsDialog } from "./lib/store/miniApps.svelte";
   import Setup from "./lib/ui/Setup.svelte";
@@ -62,11 +68,38 @@
     });
   });
 
+  // ほかのアプリから共有された文は、署名できるアカウントなら投稿欄の本文の後ろに入れて開く（Android 版の receiveShared）
+  $effect(() => {
+    const text = pendingShare.text;
+    if (!text || !viewer.pubkey || !viewer.ready) return;
+    untrack(() => {
+      pendingShare.text = null;
+      if (!viewer.canSign) {
+        toast.show("見るだけのアカウントでは、共有された文を投稿できません");
+        return;
+      }
+      composer.show("post");
+      composer.text = appendShared(composer.text, text);
+      composer.saveDraft();
+    });
+  });
+
+  // 自分の Lightning アドレスが分かったら、zap レシートを署名してよい鍵を 1 回だけ聞く（偽の zap を通知に出さない）
+  $effect(() => {
+    const pubkey = viewer.pubkey;
+    if (pubkey && profiles.get(pubkey)?.profile.lud16) untrack(() => notifications.learnZapIssuer(pubkey));
+  });
+
   // 設定でオンにしていて署名できるときだけ、リレーの認証（NIP-42）に答える
   $effect(() => {
     const enabled = settings.relayAuth && viewer.canSign;
+    // 認証で自分の公開鍵を名乗るのは、自分で選んだリレー（読み書き・検索・グローバル）と、送っている最中のリレーだけ
+    // （ほかの人の投稿を読むためだけにつないだリレーには名乗らない。Android 版の configureAuth と同じ）
+    const me = viewer.pubkey;
+    const chosen = new Set(relaySet([...viewer.readRelays, ...viewer.writeRelays, ...searchRelays(me), ...globalRelays(me)]));
     pool.authenticator = enabled
-      ? async (url, challenge) => {
+      ? async (url, challenge, sending) => {
+          if (!sending && !chosen.has(url)) return null;
           try {
             const signer = await viewer.getSigner();
             return await signer.sign({ kind: 22242, created_at: Math.floor(Date.now() / 1000), tags: [["relay", url], ["challenge", challenge]], content: "" });
@@ -116,9 +149,9 @@
     if (settings.profileInPager && route.name === "profile" && route.pubkey === viewer.pubkey) return 4;
     return -1;
   });
-  /** 「その他」のメニュー（Android 版の MoreMenu: プロフィール・DM・ブックマーク・設定）。 */
+  /** 「その他」のメニュー（Android 版の MoreMenu: プロフィール・リスト・ブックマーク・設定など）。 */
   let moreOpen = $state(false);
-  const inMore = $derived(route.name === "messages" || route.name === "bookmarks" || route.name === "lists" || route.name === "settings" || (route.name === "profile" && route.pubkey === viewer.pubkey));
+  const inMore = $derived(route.name === "bookmarks" || route.name === "lists" || route.name === "relaySets" || route.name === "settings" || (route.name === "profile" && route.pubkey === viewer.pubkey));
 
   $effect(() => {
     if (!mainElement || deck.active) return;
@@ -178,7 +211,7 @@
       <a class="logo" href="#/" onclick={tapHome}>ぺにょったー</a>
       <span class="badge">{viewer.canSign ? "Web 版" : "Web 版・見るだけ"}</span>
       {#if TEST_RELAY}<span class="badge test">テストモード</span>{/if}
-      {#if settings.peusaMode && onHome}<PeusaMood />{/if}
+      {#if peusaOn("mood") && onHome}<PeusaMood />{/if}
     </header>
 
     {#if pullDistance > 0 || refreshing}
@@ -201,7 +234,7 @@
       <a href="#/search" class:active={route.name === "search"}><span><Icon name="search" peusa={2} /></span>検索</a>
       <a href="#/chat" class:active={route.name === "chat"}><span><Icon name="forum" peusa={3} /></span>チャット</a>
       <button type="button" class:active={inMore || moreOpen} onclick={() => (moreOpen = !moreOpen)} aria-expanded={moreOpen}>
-        <span class="badged"><Icon name="menu" peusa={4} />{#if dms.unreadCount > 0}<i class="badge-dot" aria-label="DM の未読があります"></i>{/if}</span>その他
+        <span><Icon name="menu" peusa={4} /></span>その他
       </button>
     </nav>
   {/if}
@@ -211,7 +244,6 @@
     <div class="more-back" onclick={() => (moreOpen = false)}>
       <nav class="more-sheet" aria-label="その他">
         <a href={profileHref(viewer.pubkey)} onclick={() => (moreOpen = false)}><Icon name="person" peusa={5} />プロフィール</a>
-        <a href="#/messages" onclick={() => (moreOpen = false)}><Icon name="mail" peusa={6} />DM{#if dms.unreadCount > 0}<span class="count">{dms.unreadCount}</span>{/if}</a>
         <a href="#/lists" onclick={() => (moreOpen = false)}><Icon name="listAlt" peusa={7} />リスト</a>
         <a href="#/bookmarks" onclick={() => (moreOpen = false)}><Icon name="bookmarkBorder" peusa={8} />ブックマーク</a>
         <button type="button" onclick={() => { moreOpen = false; jumpDialog.open = true; }}><Icon name="history" peusa={9} />日時を指定して見る</button>
@@ -220,16 +252,17 @@
       </nav>
     </div>
   {/if}
-  <!-- チャットと DM には自分の入力欄があるので、投稿欄は引用するときだけ出す（Android 版と同じ） -->
-  {#if viewer.canSign && !deck.active && (composer.open || (route.name !== "chat" && route.name !== "messages"))}<Composer />{/if}
+  <!-- チャットには自分の入力欄があるので、投稿欄は引用するときだけ出す（Android 版と同じ） -->
+  {#if viewer.canSign && !deck.active && (composer.open || route.name !== "chat")}<Composer />{/if}
   <EmojiPackSheet />
+  <InteractionMenu />
   <FlowSummary />
   <HoverProfileCard />
   <JumpDialog />
   <MiniAppsDialog />
   {#if settings.peusaMode}<PeusaLayer />{/if}
   <ListConfirmDialog />
-  {#if toast.message}<div class="toast" role="status">{#if settings.peusaMode && peusaFailure(toast.message)}<img class="toast-peusa" src={peusaPicture("error-noChar")} alt="" width="44" height="44" data-testid="peusa-error" />{/if}{toast.message}</div>{/if}
+  {#if toast.message}<div class="toast" role="status">{#if peusaOn("snackbar") && peusaFailure(toast.message)}<img class="toast-peusa" src={peusaPicture("error-noChar")} alt="" width="44" height="44" data-testid="peusa-error" />{/if}{toast.message}</div>{/if}
   {#if pwa.updateReady}
     <div class="update" role="status">
       新しい版があります
@@ -405,14 +438,6 @@
   .more-sheet a:hover,
   .more-sheet button:hover {
     background: var(--surface-low);
-  }
-  .more-sheet .count {
-    margin-left: auto;
-    padding: 0 8px;
-    font-size: 0.8em;
-    color: #fff;
-    background: #d33;
-    border-radius: 999px;
   }
   .tabs.hidden-by-keyboard {
     display: none;

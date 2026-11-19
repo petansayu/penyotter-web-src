@@ -19,12 +19,14 @@ export type Route =
   | { name: "around"; id?: string; at?: number; scope: AroundScope; author?: string }
   | { name: "history" }
   | { name: "bookmarks" }
+  | { name: "postWatch" }
   | { name: "lists"; identifier: string | null }
   | { name: "write"; identifier: string | null }
   | { name: "relay"; url: string }
+  | { name: "relaySets"; identifier: string | null }
+  | { name: "relayFeed"; url: string }
   | { name: "secretLink" }
   | { name: "chat"; channel: string | null }
-  | { name: "messages"; peer: string | null }
   | { name: "notifications" }
   | { name: "search"; q: string }
   | { name: "profile"; pubkey: string; relays: string[] }
@@ -108,6 +110,14 @@ export function parseRoute(hash: string): Route {
   }
   if (path === "/history") return { name: "history" };
   if (path === "/bookmarks") return { name: "bookmarks" };
+  if (path === "/post-watch") return { name: "postWatch" };
+  if (path === "/relaysets") return { name: "relaySets", identifier: null };
+  const setId = path.match(/^\/relaysets\/(.+)$/)?.[1];
+  if (setId) return { name: "relaySets", identifier: setId };
+  if (path === "/relayfeed") {
+    const url = new URLSearchParams(queryString).get("url") ?? "";
+    if (/^wss:\/\/[^\s]+$/.test(url)) return { name: "relayFeed", url };
+  }
   if (path === "/lists") return { name: "lists", identifier: null };
   const listId = path.match(/^\/lists\/(.+)$/)?.[1];
   if (listId) return { name: "lists", identifier: listId };
@@ -136,16 +146,6 @@ export function parseRoute(hash: string): Route {
   if (path === "/chat") return { name: "chat", channel: null };
   const channel = path.match(/^\/chat\/([0-9a-f]{64})$/)?.[1];
   if (channel) return { name: "chat", channel };
-  if (path === "/messages") return { name: "messages", peer: null };
-  const peer = path.match(/^\/messages\/(npub1[0-9a-z]+)$/)?.[1];
-  if (peer) {
-    try {
-      const decoded = nip19.decode(peer);
-      if (decoded.type === "npub") return { name: "messages", peer: decoded.data };
-    } catch {
-      // 下で見つからない画面にする
-    }
-  }
   if (path === "/notifications") return { name: "notifications" };
   const [, kind, value] = path.match(/^\/(p|e)\/(.+)$/) ?? [];
   if (kind && value) {
@@ -205,3 +205,6 @@ export const writeHref = (identifier?: string) => `#/write${identifier ? `?${new
 
 /** リレーの情報画面。 */
 export const relayHref = (url: string) => `#/relay?${new URLSearchParams({ url })}`;
+/** 1 つのリレーのタイムライン（Android 版の「このリレーのタイムライン」）。 */
+export const relayFeedHref = (url: string) => `#/relayfeed?${new URLSearchParams({ url })}`;
+export const relaySetHref = (identifier: string) => `#/relaysets/${encodeURIComponent(identifier)}`;

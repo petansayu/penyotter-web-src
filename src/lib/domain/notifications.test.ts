@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { nip19, type Event } from "nostr-tools";
 import { encodeHidden } from "./hiddenMessages";
-import { actionLines, bolt11Msats, eligible, formatSats, notificationGroups, notificationTarget, notificationType, sats, zapReceipt } from "./notifications";
+import { finalizeEvent, generateSecretKey, getPublicKey } from "nostr-tools";
+import { actionLines, bolt11Msats, eligible, formatSats, notificationGroups, notificationTarget, notificationType, sats, zapChecks, zapReceipt } from "./notifications";
 
 const ME = "a".repeat(64);
 const OTHER = "b".repeat(64);
@@ -12,15 +13,19 @@ const event = (fields: Partial<Event>): Event =>
   ({ id: (next++).toString(16).padStart(64, "0"), pubkey: OTHER, created_at: next, kind: 1, tags: [["p", ME]], content: "", sig: "0".repeat(128), ...fields }) as Event;
 const zap = (sender: string, amount: string, bolt11?: string) => event({
   kind: 9735, pubkey: "d".repeat(64),
-  tags: [["p", ME], ["e", POST], ["description", JSON.stringify({ pubkey: sender, content: "ありがとう", tags: [["amount", amount]] })], ...(bolt11 ? [["bolt11", bolt11]] : [])],
+  tags: [["p", ME], ["e", POST], ["description", JSON.stringify({ kind: 9734, pubkey: sender, content: "ありがとう", tags: [["p", ME], ["amount", amount]] })], ...(bolt11 ? [["bolt11", bolt11]] : [])],
 });
+// 署名の確認はここでは種類だけ見る（本物の署名の確認は下の「zap レシートの検証」で）
+const realCheck = zapChecks.requestIsValid;
+zapChecks.requestIsValid = (request) => (request as { kind?: number }).kind === 9734;
 
 describe("通知の判定", () => {
   it("自分宛てで、自分以外が作ったものだけ", () => {
     expect(eligible(event({ tags: [["p", ME], ["e", POST, "", "root"]] }), ME)).toBe(true);
     expect(eligible(event({ pubkey: ME, tags: [["p", ME], ["e", POST, "", "root"]] }), ME)).toBe(false);
     expect(eligible(event({ tags: [["e", POST, "", "root"]] }), ME)).toBe(false);
-    expect(eligible(event({ tags: [["p", ME]] }), ME)).toBe(false); // 何についての通知か決まらない
+    expect(eligible(event({ tags: [["p", ME]] }), ME)).toBe(true); // 返信でないメンション
+    expect(eligible(event({ kind: 7, tags: [["p", ME]] }), ME)).toBe(false); // 何についての通知か決まらない
     expect(eligible(event({ kind: 3, tags: [["p", ME]] }), ME)).toBe(false);
   });
 
@@ -85,5 +90,32 @@ describe("隠しメッセージ付きのリアクション", () => {
     const lines = actionLines(group).filter((line) => line.type === "reaction");
     expect(lines).toHaveLength(1);
     expect(lines[0]).toMatchObject({ content: "❤️", actors: expect.arrayContaining([OTHER, THIRD]), hidden: [{ actor: THIRD, message: "すき" }] });
+  });
+});
+
+describe("zap レシートの検証（NIP-57、Android 版の Zaps.receipt と同じ）", () => {
+  const receiptWith = (request: object, extra: string[][] = []) =>
+    event({ kind: 9735, pubkey: "d".repeat(64), tags: [["p", ME], ["e", POST], ["description", JSON.stringify(request)], ...extra] });
+  it("中のリクエストに正しい署名がなければ、zap として扱わない", () => {
+    const secret = generateSecretKey();
+    const signed = finalizeEvent({ kind: 9734, created_at: 1, tags: [["p", ME], ["amount", "21000"]], content: "" }, secret);
+    // レシートの中のリクエストは JSON の文字列から読むので、ここでも JSON を通す（確かめた印を持ち越さない）
+    const plain = (fields: object = {}) => JSON.parse(JSON.stringify({ ...signed, ...fields }));
+    expect(realCheck(plain())).toBe(true);
+    expect(realCheck(plain({ content: "書き換え" }))).toBe(false);
+    expect(realCheck(plain({ kind: 1 }))).toBe(false);
+    expect(zapReceipt(receiptWith({ kind: 9734, pubkey: getPublicKey(secret), tags: [["p", ME]] }))?.sender).toBe(getPublicKey(secret));
+  });
+  it("リクエストの宛先がレシートの p にない・金額が請求書と違う・リクエストがないものは捨てる", () => {
+    expect(zapReceipt(receiptWith({ kind: 9734, pubkey: OTHER, tags: [["p", THIRD]] }))).toBeNull();
+    expect(zapReceipt(receiptWith({ kind: 9734, pubkey: OTHER, tags: [["p", ME], ["amount", "1000"]] }, [["bolt11", "lnbc210n1pxyz"]]))).toBeNull();
+    expect(zapReceipt(event({ kind: 9735, tags: [["p", ME], ["P", OTHER], ["e", POST]] }))).toBeNull();
+  });
+  it("自分の Lightning アドレスのサーバーが分かれば、ほかの人が署名したレシートは通知に出さない", () => {
+    const real = { ...zap(OTHER, "1000"), pubkey: "e".repeat(64) };
+    const fake = zap(THIRD, "1000");
+    const ids = (issuer: string | null) => notificationGroups([real, fake], ME, { type: "all", zapIssuer: issuer }).flatMap((g) => g.events.map((e) => e.id)).sort();
+    expect(ids("e".repeat(64))).toEqual([real.id]);
+    expect(ids(null)).toEqual([real.id, fake.id].sort());
   });
 });

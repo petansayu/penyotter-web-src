@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { peusaOn } from "../store/peusa.svelte";
   import { settings } from "../store/settings.svelte";
   import PeusaMood from "./PeusaMood.svelte";
   import { jumpDialog } from "../store/jump.svelte";
@@ -8,7 +9,6 @@
   import { composer } from "../store/composer.svelte";
   import { deck } from "../store/deck.svelte";
   import { notifications } from "../store/notifications.svelte";
-  import { dms } from "../store/dm.svelte";
   import { viewer } from "../store/viewer.svelte";
   import { TEST_RELAY } from "../nostr/testMode";
   import AddColumn from "./AddColumn.svelte";
@@ -40,11 +40,13 @@
       case "flow": return "たぶんこの流れ";
       case "history": return "一覧の履歴";
       case "bookmarks": return "ブックマーク";
+      case "postWatch": return "投稿のお知らせ";
       case "write": return "記事を書く";
       case "lists": return "リスト";
       case "relay": return "リレーの情報";
+      case "relaySets": return "リレーセット";
+      case "relayFeed": return "リレーのタイムライン";
       case "chat": return "チャット";
-      case "messages": return "DM";
       default: return "";
     }
   });
@@ -292,9 +294,6 @@
       {#if adding}<span class="popup up"><AddColumn close={() => (adding = false)} added={(id) => showColumn(id)} /></span>{/if}
     </span>
     <a class="plain" href="#/chat" class:active={route.name === "chat"} title="チャット" aria-label="チャット"><Icon name="forum" /></a>
-    {#if viewer.canSign}
-      <a class="plain badged-link" href="#/messages" class:active={route.name === "messages"} title="DM" aria-label="DM"><Icon name="mail" />{#if dms.unreadCount > 0}<i class="badge-dot" aria-label="DM の未読があります"></i>{/if}</a>
-    {/if}
     <a class="plain" href="#/bookmarks" class:active={route.name === "bookmarks"} title="ブックマーク" aria-label="ブックマーク"><Icon name="bookmarkBorder" /></a>
     <button type="button" class="plain" onclick={() => (jumpDialog.open = true)} title="日時を指定して見る" aria-label="日時を指定して見る"><Icon name="history" /></button>
     <button type="button" class="plain" onclick={() => (miniAppsDialog.open = true)} title="ミニアプリ" aria-label="ミニアプリ"><Icon name="apps" /></button>
@@ -302,7 +301,7 @@
       <a class="plain" href={profileHref(viewer.pubkey)} class:active={route.name === "profile" && route.pubkey === viewer.pubkey} title="自分のプロフィール" aria-label="自分のプロフィール"><Icon name="person" /></a>
     {/if}
     <a class="plain" href="#/settings" class:active={route.name === "settings"} title="設定" aria-label="設定"><Icon name="settings" /></a>
-    {#if settings.peusaMode}<PeusaMood />{/if}
+    {#if peusaOn("mood")}<PeusaMood />{/if}
     <button type="button" class="plain" class:active={helpOpen} onclick={() => (helpOpen = !helpOpen)} title="キーボードの操作（?）" aria-label="キーボードの操作"><Icon name="keyboard" /></button>
     {#if TEST_RELAY}<span class="test" title="テストモード">テスト</span>{/if}
     {#if !viewer.canSign}<span class="readonly" title="見るだけ">見る<br />だけ</span>{/if}
@@ -539,9 +538,6 @@
     border-radius: 999px;
     cursor: pointer;
     text-decoration: none;
-  }
-  .badged-link {
-    position: relative;
   }
   .plain.active {
     color: var(--text);

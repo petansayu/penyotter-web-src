@@ -39,7 +39,7 @@ export function requestStatuses(pubkeys: Iterable<string>) {
     const batch = [...queue];
     queue = new Set();
     for (let i = 0; i < batch.length; i += 80) {
-      void fetchFromAuthors(batch.slice(i, i + 80), { kinds: [30315], "#d": ["general", "music"] }, viewer.alwaysOn, keep, 400);
+      void fetchFromAuthors(batch.slice(i, i + 80), { kinds: [30315], "#d": ["general", "music"] }, viewer.alwaysOn, keep, 400, [], viewer.followOutbox);
     }
   }, 300);
 }

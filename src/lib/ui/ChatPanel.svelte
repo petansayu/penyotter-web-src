@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { peusaFaceOf, peusaStrong } from "../store/peusa.svelte";
+  import { peusaFaceOf, peusaOn } from "../store/peusa.svelte";
   import { tick, untrack } from "svelte";
   import { chatPlacement, messageReplyTo } from "../domain/chat";
   import { visibleText } from "../domain/hiddenMessages";
@@ -189,7 +189,7 @@
     {#each list as item (item.id)}
       <li>
         <a href="#/chat/{item.id}" onclick={(event) => { event.preventDefault(); navigate(`#/chat/${item.id}`); }}>
-          {#if peusaStrong()}<img class="picture" src={peusaFaceOf(item.id)} alt="" data-testid="channel-peusa" />{:else if item.meta.picture}<img class="picture" src={item.meta.picture} alt="" referrerpolicy="no-referrer" />{:else}<span class="picture initial">{item.meta.name.slice(0, 1)}</span>{/if}
+          {#if peusaOn("channelIcons")}<img class="picture" src={peusaFaceOf(item.id)} alt="" data-testid="channel-peusa" />{:else if item.meta.picture}<img class="picture" src={item.meta.picture} alt="" referrerpolicy="no-referrer" />{:else}<span class="picture initial">{item.meta.name.slice(0, 1)}</span>{/if}
           <span class="channel-text">
             <strong>{item.meta.name}</strong>
             {#if item.meta.about}<span>{item.meta.about}</span>{/if}

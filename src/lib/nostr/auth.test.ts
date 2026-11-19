@@ -35,4 +35,22 @@ describe("リレーの認証", () => {
     const fetched = await pool.fetch([relay.url], [{ ids: [event.id] }]);
     expect(fetched.events.has(event.id)).toBe(true);
   }, 20_000);
+
+  it("送っている最中かどうかを渡す（選んでいないリレーには、送るときだけ名乗る）", async () => {
+    const asked: boolean[] = [];
+    pool.authenticator = (url, challenge, sending) => {
+      asked.push(sending);
+      return sending ? sign(url, challenge) : Promise.resolve(null);
+    };
+    // 前のテストで認証済みの接続を使わないよう、別のリレーで
+    const other = startTestRelay(17780, { auth: true }) as typeof relay;
+    await other.ready;
+    try {
+      const result = await publish([other.url], post());
+      expect(result.accepted).toBe(1);
+      expect(asked).toContain(true);
+    } finally {
+      await other.close();
+    }
+  }, 20_000);
 });
