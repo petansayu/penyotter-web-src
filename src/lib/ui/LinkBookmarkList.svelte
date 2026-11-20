@@ -13,6 +13,7 @@
   let adding = $state(false);
   let menuFor = $state<LinkBookmark | null>(null);
   let removing = $state<LinkBookmark | null>(null);
+  let editing = $state<LinkBookmark | null>(null);
 
   // 見る人が変わったときだけ読み直す（refresh の中の $state を読むと、読み終わるたびにまた走ってしまう）
   $effect(() => {
@@ -62,6 +63,7 @@
   <div class="row">
     <a class="link" href={link.url} target="_blank" rel="noopener noreferrer">
       <strong>{link.title || link.url}</strong>
+      {#if link.description}<span class="description">{link.description}</span>{/if}
       <span class="url">{link.url}</span>
       <small>{link.public ? "公開" : "非公開"} · {day(link.addedAt)}</small>
     </a>
@@ -70,6 +72,7 @@
       {#if menuFor === link}
         <span class="menu" role="menu">
           {#if link.from && sourceHref(link.from)}<a role="menuitem" href={sourceHref(link.from)} onclick={() => (menuFor = null)}>元の投稿を見る</a>{/if}
+          {#if !link.public || viewer.canSign}<button type="button" role="menuitem" onclick={() => { menuFor = null; editing = link; }}>編集</button>{/if}
           <button type="button" role="menuitem" onclick={() => { menuFor = null; void copy(link.url); }}>リンクをコピー</button>
           <button type="button" role="menuitem" class="danger" onclick={() => { menuFor = null; removing = link; }}>削除</button>
         </span>
@@ -89,6 +92,7 @@
   </div>
 {/if}
 {#if adding}<LinkBookmarkDialog close={() => (adding = false)} />{/if}
+{#if editing}<LinkBookmarkDialog editing={editing} close={() => (editing = null)} />{/if}
 
 <style>
   .intro {
@@ -138,6 +142,15 @@
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
+  }
+  .description {
+    display: -webkit-box;
+    overflow: hidden;
+    font-size: 0.85em;
+    white-space: pre-wrap;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+    -webkit-box-orient: vertical;
   }
   .url {
     font-size: 0.8em;
