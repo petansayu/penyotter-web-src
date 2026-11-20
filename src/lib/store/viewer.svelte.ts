@@ -273,7 +273,7 @@ class Viewer {
     this.applyBookmarks(undefined);
     try {
       localStorage.removeItem(STORAGE_KEY);
-      if (previous) for (const key of ["notifications", "mute-list", "search-relays", "global-relays", "home-tab", "relay-list", "active-relays", "follow-outbox", "search-history", "post-watch"]) localStorage.removeItem(`${key}.${previous}`);
+      if (previous) for (const key of ["notifications", "mute-list", "search-relays", "global-relays", "home-tab", "relay-list", "active-relays", "follow-outbox", "search-history", "post-watch", "link-bookmarks"]) localStorage.removeItem(`${key}.${previous}`);
       if (previous) forgetRemote(previous);
     } catch {
       // 何もしない

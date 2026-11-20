@@ -7,6 +7,10 @@
   import { keepNotes, notes } from "../store/cache.svelte";
   import { viewer } from "../store/viewer.svelte";
   import NoteCard from "./NoteCard.svelte";
+  import LinkBookmarkList from "./LinkBookmarkList.svelte";
+
+  /** 「投稿」と「リンク」（リンクのブックマーク、Android 版の BookmarkTabs）。 */
+  let tab = $state<"posts" | "links">("posts");
 
   /**
    * ブックマーク（公開ブックマーク、NIP-51 の kind 10003。Android 版の「その他」→「ブックマーク」）。新しく足したものを
@@ -53,6 +57,13 @@
   const noteOf = (ref: (typeof refs)[number]) => (void version, ref.type === "e" ? notes.get(ref.value) : addressed.get(ref.value));
 </script>
 
+<div class="tabs" role="tablist">
+  <button type="button" role="tab" aria-selected={tab === "posts"} class:active={tab === "posts"} onclick={() => (tab = "posts")}>投稿</button>
+  <button type="button" role="tab" aria-selected={tab === "links"} class:active={tab === "links"} onclick={() => (tab = "links")}>リンク</button>
+</div>
+{#if tab === "links"}
+  <LinkBookmarkList />
+{:else}
 <section class="bookmarks">
   <h2>ブックマーク</h2>
   <p class="muted">公開ブックマーク（NIP-51 の kind 10003）です。足す・外すは、投稿の「…」から。非公開のブックマークは、この画面では読みません。</p>
@@ -72,8 +83,27 @@
     <p class="missing">{loading ? "読み込んでいます…" : `読み込めませんでした（${ref.value.slice(0, 24)}…）`}</p>
   {/if}
 {/each}
+{/if}
 
 <style>
+  .tabs {
+    display: flex;
+    border-bottom: 1px solid var(--outline-variant);
+  }
+  .tabs button {
+    flex: 1;
+    padding: 12px 0;
+    font: inherit;
+    color: var(--muted);
+    background: none;
+    border: none;
+    border-bottom: 3px solid transparent;
+    cursor: pointer;
+  }
+  .tabs button.active {
+    color: var(--primary);
+    border-bottom-color: var(--primary);
+  }
   .bookmarks {
     padding: 12px 16px 4px;
     border-bottom: 1px solid var(--outline-variant);
