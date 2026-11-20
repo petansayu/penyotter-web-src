@@ -1,16 +1,21 @@
 <script lang="ts">
-  import { MAX_TITLE, normalizeLink } from "../domain/linkBookmarks";
+  import { MAX_DESCRIPTION, MAX_TITLE, normalizeLink, type LinkBookmark } from "../domain/linkBookmarks";
   import type { Event } from "../nostr/events";
   import { linkBookmarks } from "../store/linkBookmarks.svelte";
   import { viewer } from "../store/viewer.svelte";
 
-  /** リンクをブックマークに足す（Android 版の LinkBookmarkDialog）。url は最初の値（「＋」なら空）、from は見つけた投稿。 */
-  let { url: initialUrl = "", from, close }: { url?: string; from?: Event; close: () => void } = $props();
+  /**
+   * リンクをブックマークに足す（Android 版の LinkBookmarkDialog）。url は最初の値（「＋」なら空）、from は見つけた投稿。
+   * editing を渡すと、そのブックマークの題名と説明を直す（リンクと公開・非公開は変えない）。
+   */
+  let { url: initialUrl = "", from, editing, close }: { url?: string; from?: Event; editing?: LinkBookmark; close: () => void } = $props();
 
   let dialog = $state<HTMLDialogElement>();
-  let url = $state((() => initialUrl)());
-  let title = $state("");
-  let isPublic = $state(false);
+  const start = (() => ({ url: editing?.url ?? initialUrl, title: editing?.title ?? "", description: editing?.description ?? "", isPublic: editing?.public ?? false }))();
+  let url = $state(start.url);
+  let title = $state(start.title);
+  let description = $state(start.description);
+  let isPublic = $state(start.isPublic);
   let error = $state<string | null>(null);
   const valid = $derived(normalizeLink(url) !== null);
 
@@ -21,7 +26,8 @@
   async function add() {
     error = null;
     try {
-      await linkBookmarks.add(url, title, isPublic, from);
+      if (editing) await linkBookmarks.edit(editing, title, description);
+      else await linkBookmarks.add(url, title, isPublic, from, description);
       dialog?.close();
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
@@ -29,18 +35,23 @@
   }
 </script>
 
-<dialog bind:this={dialog} onclose={close} aria-label="リンクをブックマーク">
-  <h3>リンクをブックマーク</h3>
-  <label class="field"><span>URL</span><input type="url" bind:value={url} placeholder="https://…" /></label>
+<dialog bind:this={dialog} onclose={close} aria-label={editing ? "ブックマークを編集" : "リンクをブックマーク"}>
+  <h3>{editing ? "ブックマークを編集" : "リンクをブックマーク"}</h3>
+  <label class="field"><span>URL</span><input type="url" bind:value={url} placeholder="https://…" readonly={!!editing} disabled={!!editing} /></label>
   {#if url.trim() && !valid}<p class="error">http か https の URL を入力してください</p>{/if}
-  <label class="field"><span>題名（空ならホスト名）</span><input type="text" maxlength={MAX_TITLE} bind:value={title} /></label>
-  <label class="choice"><input type="radio" name="link-visibility" value={false} bind:group={isPublic} />非公開（このブラウザだけ）</label>
-  <label class="choice" class:disabled={!viewer.canSign}><input type="radio" name="link-visibility" value={true} bind:group={isPublic} disabled={!viewer.canSign} />{viewer.canSign ? "公開（リレーに保存）" : "公開（署名できるアカウントで使えます）"}</label>
-  {#if isPublic}<p class="error">公開のブックマークは、だれでも見られます（NIP-B0、kind 39701）。</p>{/if}
+  <label class="field"><span>{editing ? "題名" : "題名（空ならホスト名）"}</span><input type="text" maxlength={MAX_TITLE} bind:value={title} /></label>
+  <label class="field"><span>説明（任意）</span><textarea rows="3" maxlength={MAX_DESCRIPTION} bind:value={description}></textarea></label>
+  {#if editing}
+    <p class="muted">{editing.public ? "公開のブックマーク（直すとリレーに送り直します）" : "非公開のブックマーク"}</p>
+  {:else}
+    <label class="choice"><input type="radio" name="link-visibility" value={false} bind:group={isPublic} />非公開（このブラウザだけ）</label>
+    <label class="choice" class:disabled={!viewer.canSign}><input type="radio" name="link-visibility" value={true} bind:group={isPublic} disabled={!viewer.canSign} />{viewer.canSign ? "公開（リレーに保存）" : "公開（署名できるアカウントで使えます）"}</label>
+    {#if isPublic}<p class="error">公開のブックマークは、だれでも見られます（NIP-B0、kind 39701）。</p>{/if}
+  {/if}
   {#if error}<p class="error">{error}</p>{/if}
   <div class="buttons">
     <button type="button" onclick={() => dialog?.close()}>キャンセル</button>
-    <button type="button" class="filled" disabled={!valid || linkBookmarks.busy} onclick={add}>追加</button>
+    <button type="button" class="filled" disabled={!valid || linkBookmarks.busy} onclick={add}>{editing ? "保存" : "追加"}</button>
   </div>
 </dialog>
 
@@ -64,6 +75,21 @@
     margin-bottom: 8px;
     font-size: 0.85em;
     color: var(--muted);
+  }
+  .muted {
+    margin: 4px 0;
+    font-size: 0.85em;
+    color: var(--muted);
+  }
+  .field textarea {
+    font: inherit;
+    font-size: 1rem;
+    padding: 6px 8px;
+    color: var(--text);
+    background: var(--background);
+    border: 1px solid var(--outline);
+    border-radius: 8px;
+    resize: vertical;
   }
   .field input {
     font: inherit;

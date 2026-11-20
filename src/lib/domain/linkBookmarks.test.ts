@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Event } from "../nostr/events";
 import {
   addLinkBookmark, buildLinkBookmark, decodeLinkBookmarks, linkBookmarkDeletion, linkFromIdentifier, linkIdentifier, linkKey,
-  MAX_URL, normalizeLink, publicLinkBookmarks, type LinkBookmark,
+  MAX_URL, normalizeLink, publicLinkBookmarks, replaceLinkBookmark, type LinkBookmark,
 } from "./linkBookmarks";
 
 const ME = "a".repeat(64);
@@ -44,6 +44,16 @@ describe("リンクのブックマーク", () => {
     expect(links.map((l) => l.url)).toEqual(["https://example.com/b", "https://example.com/a"]);
     expect(links[1].title).toBe("新しい");
     expect(links[1].addedAt).toBe(50);
+  });
+
+  it("説明は content（Android 版と同じ）", () => {
+    expect(buildLinkBookmark("https://example.com/show", "番組", 2000, 1000, "  第12回まで聞いた  ").content).toBe("第12回まで聞いた");
+    const read = publicLinkBookmarks([{ ...event("example.com/show", 2000), content: "ほかのアプリの説明" }], ME);
+    expect(read[0].description).toBe("ほかのアプリの説明");
+    const list: LinkBookmark[] = [{ url: "https://example.com/a", title: "A", addedAt: 10, public: false }, { url: "https://example.com/b", title: "B", addedAt: 5, public: false }];
+    const edited = replaceLinkBookmark(list, { ...list[1], title: "B2", description: "メモ" });
+    expect(edited.map((l) => l.title)).toEqual(["A", "B2"]);
+    expect(decodeLinkBookmarks(JSON.parse(JSON.stringify(edited)), false)[1].description).toBe("メモ");
   });
 
   it("削除の依頼はアドレスを指す", () => {

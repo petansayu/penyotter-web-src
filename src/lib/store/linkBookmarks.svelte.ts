@@ -1,7 +1,7 @@
 import { nip19 } from "nostr-tools";
 import {
   addLinkBookmark, buildLinkBookmark, decodeLinkBookmarks, linkBookmarkDeletion, linkIdentifier, linkKey, LINK_BOOKMARK_KIND,
-  MAX_EACH, MAX_TITLE, normalizeLink, publicLinkBookmarks, type LinkBookmark,
+  MAX_DESCRIPTION, MAX_EACH, MAX_TITLE, normalizeLink, publicLinkBookmarks, replaceLinkBookmark, type LinkBookmark,
 } from "../domain/linkBookmarks";
 import type { Event } from "../nostr/events";
 import { eventsOf, pool, publish } from "../nostr/pool";
@@ -78,15 +78,16 @@ class LinkBookmarks {
   }
 
   /** 足す。題名が空ならホスト名。公開は kind 39701 を署名して書き込みリレーへ。 */
-  async add(url: string, title: string, isPublic: boolean, from?: Event) {
+  async add(url: string, title: string, isPublic: boolean, from?: Event, description = "") {
     const me = this.prepare();
     if (!me) return;
     const link = normalizeLink(url);
     if (!link) throw new Error("http か https の URL を入力してください");
     const named = (title.trim() || new URL(link).hostname.replace(/^www\./, "")).slice(0, MAX_TITLE);
+    const note = description.trim().slice(0, MAX_DESCRIPTION);
     if (!isPublic) {
       const source = from ? nip19.neventEncode({ id: from.id, author: from.pubkey, kind: from.kind }) : undefined;
-      this.privateLinks = addLinkBookmark(this.privateLinks, { url: link, title: named, addedAt: now(), public: false, ...(source ? { from: source } : {}) });
+      this.privateLinks = addLinkBookmark(this.privateLinks, { url: link, title: named, addedAt: now(), public: false, ...(source ? { from: source } : {}), ...(note ? { description: note } : {}) });
       this.save();
       toast.show("リンクを非公開ブックマークに追加しました");
       return;
@@ -96,15 +97,44 @@ class LinkBookmarks {
     try {
       const old = this.publicLinks.find((item) => linkKey(item.url) === linkKey(link));
       const signer = await viewer.getSigner();
-      const event = await signer.sign(buildLinkBookmark(link, named, now(), old?.addedAt));
+      const event = await signer.sign(buildLinkBookmark(link, named, now(), old?.addedAt, note));
       const result = await publish(viewer.writeRelays, event);
       if (result.accepted === 0) throw new Error(`公開のブックマークを送れませんでした（${summary(result)}）`);
       if (this.owner !== me) return;
       // 消したリンクを足し直したら、また出す
       delete this.removed[linkIdentifier(link)];
-      this.publicLinks = addLinkBookmark(this.publicLinks, { url: link, title: named, addedAt: old?.addedAt ?? event.created_at, public: true, eventId: event.id });
+      this.publicLinks = addLinkBookmark(this.publicLinks, { url: link, title: named, addedAt: old?.addedAt ?? event.created_at, public: true, eventId: event.id, ...(note ? { description: note } : {}) });
       this.save();
       toast.show(`リンクを公開ブックマークに追加しました（${summary(result)}）`);
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  /** 題名と説明を直す（位置はそのまま）。公開の分は同じ d と published_at で送り直し、リレーの前の版を置き換える。 */
+  async edit(bookmark: LinkBookmark, title: string, description: string) {
+    const me = this.prepare();
+    if (!me) return;
+    const named = title.trim().slice(0, MAX_TITLE);
+    const note = description.trim().slice(0, MAX_DESCRIPTION);
+    const changed: LinkBookmark = { ...bookmark, title: named, description: note || undefined };
+    if (!bookmark.public) {
+      this.privateLinks = replaceLinkBookmark(this.privateLinks, changed);
+      this.save();
+      toast.show("ブックマークを直しました");
+      return;
+    }
+    if (!viewer.canSign) throw new Error("公開のブックマークを直すには、署名できるアカウントが必要です");
+    this.busy = true;
+    try {
+      const signer = await viewer.getSigner();
+      const event = await signer.sign(buildLinkBookmark(bookmark.url, named, now(), bookmark.addedAt, note));
+      const result = await publish(viewer.writeRelays, event);
+      if (result.accepted === 0) throw new Error(`直したブックマークを送れませんでした（${summary(result)}）`);
+      if (this.owner !== me) return;
+      this.publicLinks = replaceLinkBookmark(this.publicLinks, { ...changed, eventId: event.id });
+      this.save();
+      toast.show(`公開のブックマークを直しました（${summary(result)}）`);
     } finally {
       this.busy = false;
     }
