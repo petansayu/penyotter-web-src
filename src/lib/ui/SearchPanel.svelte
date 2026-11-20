@@ -38,6 +38,12 @@
   let filtersOpen = $state(false);
   const filterCount = $derived(activeFilters(filters));
 
+  // 探し直したり画面を閉じたりしたら、前の検索の購読をやめる
+  $effect(() => {
+    const current = search;
+    return () => current?.stop();
+  });
+
   // 検索語が変わったら（URL の q）探し直す
   $effect(() => {
     const value = q;
