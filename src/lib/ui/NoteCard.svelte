@@ -6,7 +6,7 @@
   import { visibleText } from "../domain/hiddenMessages";
   import { parsePoll } from "../domain/extraEvents";
   import { compact } from "../domain/interactions";
-  import { emojisOf, mediaOf, quoteCards, withoutMedia, withoutQuoteLink } from "../domain/content";
+  import { emojisOf, mediaOf, quoteCards, segments, withoutMedia, withoutQuoteLink } from "../domain/content";
   import { address, parent } from "../domain/threads";
   import { isHex64, tagValue, type Event } from "../nostr/events";
   import { isEmptyCard, kindCard, kindLabel, kindLine } from "../domain/kindCards";
@@ -85,6 +85,21 @@
   });
   const poll = $derived(note.kind === 1068 ? parsePoll(note) : null);
   let reporting = $state(false);
+  /** リンクのブックマークに足すリンク（「…」の「リンクをブックマーク」）。 */
+  let bookmarkingLink = $state<string | null>(null);
+  /** 本文のリンク（画像・動画でないもの、3 件まで）。 */
+  function noteLinks(): string[] {
+    const shown = new Set(media.map((m) => m.url));
+    const links = segments(note.content, new Map()).flatMap((s) => (s.type === "link" && !shown.has(s.url) ? [s.url] : []));
+    return [...new Set(links)].slice(0, 3);
+  }
+  const hostOf = (url: string) => {
+    try {
+      return new URL(url).hostname.replace(/^www\./, "");
+    } catch {
+      return url;
+    }
+  };
   let zapping = $state(false);
   // 本文として描く種類（技術資料 8.5。42 はパブリックチャットのメッセージ）
   const known = $derived([1, 1111, 42, 30023, 1068, ...MEDIA_KINDS].includes(note.kind));
@@ -261,6 +276,9 @@
             {@const addressRef = note.kind >= 30000 && note.kind < 40000 ? address(note) : null}
             {@const bookmarked = viewer.bookmarks.has(note.id) || (!!addressRef && viewer.bookmarks.has(addressRef))}
             {@render entryItem({ label: bookmarked ? "ブックマークから外す" : "ブックマークに追加", disabled: lists.busy.has(10003), run: () => void (bookmarked ? lists.unbookmark({ id: note.id, address: addressRef }) : lists.bookmark({ id: note.id, address: addressRef })) })}
+          {/if}
+          {#if viewer.pubkey}
+            {#each noteLinks() as link (link)}{@render entryItem({ label: `リンクをブックマーク（${hostOf(link)}）`, run: () => (bookmarkingLink = link) })}{/each}
           {/if}
           {@render group("ミュート", muteEntries())}
           <!-- ブロードキャスト: 署名済みのまま自分の書き込みリレーへ（ほかの人の投稿も。Android 版と同じ） -->
@@ -454,6 +472,7 @@
 </article>
 
 {#if zapping}{#await import("./ZapDialog.svelte") then { default: ZapDialog }}<ZapDialog {note} close={() => (zapping = false)} />{/await}{/if}
+{#if bookmarkingLink}{#await import("./LinkBookmarkDialog.svelte") then { default: LinkBookmarkDialog }}<LinkBookmarkDialog url={bookmarkingLink} from={note} close={() => (bookmarkingLink = null)} />{/await}{/if}
 {#if reporting}{#await import("./ReportDialog.svelte") then { default: ReportDialog }}<ReportDialog target={{ note, pubkey: note.pubkey }} close={() => (reporting = false)} />{/await}{/if}
 
 <dialog class="json" bind:this={jsonDialog} aria-label="イベントJSON">
