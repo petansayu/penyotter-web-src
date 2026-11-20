@@ -46,6 +46,7 @@ export function globalSource(): FeedSource {
 /**
  * プロフィールの投稿（技術資料 5.5）: 相手の書き込みリレーから。リポストはリポストした人の活動として扱う。
  * リレーの返事を待つ間に、ほかの画面で読んで手元にあるその人の投稿を先に出す（Android 版も保存分を先に出す）。
+ * 開いている間は、相手の書き込みリレーと常時接続リレーで購読し、新しい投稿をすぐ出す。
  */
 export function profileSource(pubkey: string, hints: string[] = []): FeedSource {
   const kinds = [...PROFILE_KINDS, 6, 16];
@@ -62,6 +63,7 @@ export function profileSource(pubkey: string, hints: string[] = []): FeedSource 
     },
     page: (until, limit, onEvent) =>
       fetchFromAuthor(pubkey, [{ kinds, authors: [pubkey], limit, ...(until !== undefined ? { until } : {}) }], viewer.readRelays, hints, onEvent),
+    live: (since, onEvent) => subscribeAuthors([pubkey], { kinds, since }, viewer.alwaysOn, onEvent, hints.length > 0 ? [{ author: pubkey, relays: hints }] : []),
     accepts: (card) => (card.repost ? card.repost.pubkey === pubkey : card.note.pubkey === pubkey),
   };
 }
@@ -71,6 +73,7 @@ export function articlesSource(pubkey: string, hints: string[] = []): FeedSource
   return {
     page: (until, limit, onEvent) =>
       fetchFromAuthor(pubkey, [{ kinds: [30023], authors: [pubkey], limit: Math.min(limit, 100), ...(until !== undefined ? { until } : {}) }], viewer.readRelays, hints, onEvent),
+    live: (since, onEvent) => subscribeAuthors([pubkey], { kinds: [30023], since }, viewer.alwaysOn, onEvent),
     accepts: (card) => card.note.pubkey === pubkey,
   };
 }

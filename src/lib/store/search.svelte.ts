@@ -42,6 +42,9 @@ export class Search {
   message = $state<string | null>(null);
   private until: number | undefined;
   private generation = 0;
+  private stopLive: (() => void) | undefined;
+  /** 最初の検索で答えたリレー（購読はここへ）。 */
+  private answered: string[] = [];
 
   constructor(readonly query: SearchQuery, readonly filters: SearchFilters = NO_FILTERS) {}
 
@@ -58,7 +61,33 @@ export class Search {
     const saved = me ? [...(await readScope(me, "home")), ...(await readScope(me, "notes"))] : [];
     for (const event of matchNotes(query, [...notes.values(), ...saved], 100, this.filters)) this.add(event);
     this.people = matchProfiles(query, [...profiles].map(([pubkey, value]) => [pubkey, value.profile]));
+    const startedAt = Math.floor(Date.now() / 1000);
+    const generation = this.generation;
     await this.remote();
+    if (generation + 1 === this.generation) this.live(startedAt - 30);
+  }
+
+  /**
+   * 開いている間は、最初の検索で答えたリレーに同じ条件を購読し、新しい投稿をすぐ足す（ほかのカラムと同じ）。
+   * 文字の検索（NIP-50）を購読で続けないリレーもあり、その分は「再取得」で読む。
+   */
+  private live(since: number) {
+    this.stopLive?.();
+    const filters = searchFilters(this.query, undefined, this.filters).map(({ until: _, limit: __, ...rest }) => ({ ...rest, since, limit: 50 }));
+    if (filters.length === 0 || this.answered.length === 0) return;
+    const query = this.query;
+    this.stopLive = pool.subscribe(this.answered, filters, (event) => {
+      if (!SEARCH_KINDS.includes(event.kind) || !matchesFilters(event, this.filters)) return;
+      if (query.type === "text" && !textMatches(event.kind === 30023 ? `${event.tags.find((t) => t[0] === "title")?.[1] ?? ""}\n${event.content}` : event.content, query.value)) return;
+      this.add(event);
+    });
+  }
+
+  /** 購読をやめる（画面を閉じた・探し直した）。 */
+  stop() {
+    this.generation++;
+    this.stopLive?.();
+    this.stopLive = undefined;
   }
 
   async more() {
@@ -126,6 +155,7 @@ export class Search {
           this.people = [...new Set([...this.people, ...people.map((event) => event.pubkey)])].slice(0, 100);
           for (const event of posts) this.add(event);
           found.push(...posts);
+          if (fetched.complete || events.length > 0) this.answered = [...new Set([...this.answered, status.url])];
           const info = fetched.complete ? null : await relayInfo(status.url);
           this.update(status.url, {
             state: fetched.complete ? "done" : events.length > 0 ? "partial" : "failed",
