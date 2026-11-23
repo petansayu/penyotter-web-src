@@ -47,8 +47,6 @@
   let menuFor = $state<Event | null>(null);
   let sendMessage = $state<string | null>(null);
   let bottom = $state<HTMLElement>();
-  /** 下に固定した入力欄の高さ。最後のメッセージが入力欄に隠れないよう、同じ高さの余白を置く。 */
-  let inputHeight = $state(0);
 
   $effect(() => {
     void chat.load();
@@ -247,9 +245,8 @@
     {#if viewer.canSign && composer.open && !deck.active}
       <!-- 引用している間は投稿欄が同じ場所に出るので、入力欄は出さない（Android 版と同じ） -->
     {:else if viewer.canSign}
-      <!-- 投稿欄と同じく、下のタブのすぐ上（文字を打っている間はキーボードのすぐ上）に固定する -->
-      <div class="input-space" style:height="{inputHeight}px"></div>
-      <div class="input" bind:clientHeight={inputHeight}>
+      <!-- 部屋は画面に固定し、メッセージの一覧だけをスクロールするので、入力欄はいつも下のタブのすぐ上にある -->
+      <div class="input">
         {#if replyTo}
           <div class="replying"><Icon name="reply" size={14} /><span>{displayName(replyTo.pubkey)}: {snippet(replyTo)}</span><button type="button" class="icon" onclick={() => (replyTo = null)} aria-label="返信をやめる"><Icon name="close" size={16} /></button></div>
         {/if}
@@ -544,9 +541,32 @@
     color: var(--muted);
   }
   /* 入力欄が画面のいちばん下に来るように（上のバーと下のタブの分を引く） */
+  /*
+   * 部屋は上のバーと下のタブのあいだに固定し、メッセージの一覧（.bubbles）だけをスクロールする。ページ全体を
+   * スクロールしていたときは、いちばん下でブラウザの引っぱり（バウンド）やアドレスバーの出入りに入力欄が
+   * 持っていかれていた。文字を打っている間は下のタブを隠すので、いちばん下（キーボードのすぐ上）まで伸ばす。
+   */
   .room {
+    position: fixed;
+    top: 52px;
+    bottom: calc(60px + env(safe-area-inset-bottom));
+    /* transform で寄せると、中のメニュー（position: fixed）が部屋の中に閉じ込められるので margin で寄せる */
+    left: 0;
+    right: 0;
+    margin: 0 auto;
+    width: min(100%, var(--column));
     display: flex;
     flex-direction: column;
+    background: var(--background);
+  }
+  :global(:root.typing) .room {
+    bottom: env(safe-area-inset-bottom);
+  }
+  /* カラム表示では下のタブがないので、これまでどおりページの中に置く */
+  :global(:root.deck) .room {
+    position: static;
+    margin: 0;
+    width: auto;
     min-height: calc(100dvh - 130px);
   }
   .room-head {
@@ -563,7 +583,13 @@
   }
   .bubbles {
     flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
     padding: 8px 12px;
+  }
+  :global(:root.deck) .bubbles {
+    overflow-y: visible;
   }
   .day {
     margin: 12px auto 6px;
@@ -644,30 +670,15 @@
     margin: 2px 6px 0;
   }
   .input {
-    position: fixed;
-    left: 50%;
-    transform: translateX(-50%);
-    bottom: calc(60px + env(safe-area-inset-bottom));
-    z-index: 20;
-    width: min(100%, var(--column));
+    flex: none;
     padding: 8px 12px;
     background: var(--container);
     border-top: 1px solid var(--outline-variant);
   }
-  /* 文字を打っている間は下のタブを隠すので、入力欄をいちばん下（キーボードのすぐ上）に置く（投稿欄と同じ） */
-  :global(:root.typing) .input {
-    bottom: env(safe-area-inset-bottom);
-  }
-  /* カラム表示では下のタブがないので、これまでどおり画面の下に貼り付ける */
+  /* カラム表示では、これまでどおり画面の下に貼り付ける */
   :global(:root.deck) .input {
     position: sticky;
     bottom: 0;
-    left: auto;
-    transform: none;
-    width: auto;
-  }
-  :global(:root.deck) .input-space {
-    display: none;
   }
   .replying {
     display: flex;
