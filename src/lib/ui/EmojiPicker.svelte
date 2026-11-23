@@ -35,12 +35,48 @@
     void emojis.load();
   });
 
+  /**
+   * カラム表示では列が overflow で切り取るので、ボタンの右端にそろえた幅 340px のパレットは左が見切れた。
+   * 開いたとき（と窓の大きさが変わったとき）に、切り取る祖先と画面の内側へ横にずらし、入りきらなければ幅を詰める。
+   */
+  let node = $state<HTMLDivElement>();
+  $effect(() => {
+    const el = node;
+    if (!el || placement === "inline") return;
+    const fit = () => fitInside(el);
+    fit();
+    window.addEventListener("resize", fit);
+    return () => window.removeEventListener("resize", fit);
+  });
+
+  function fitInside(el: HTMLElement) {
+    el.style.translate = "";
+    el.style.maxWidth = "";
+    const margin = 4;
+    let left = 0;
+    let right = document.documentElement.clientWidth;
+    for (let p = el.parentElement; p; p = p.parentElement) {
+      if (getComputedStyle(p).overflowX === "visible") continue;
+      const r = p.getBoundingClientRect();
+      left = Math.max(left, r.left + p.clientLeft);
+      right = Math.min(right, r.left + p.clientLeft + p.clientWidth);
+    }
+    const available = right - left - margin * 2;
+    if (available <= 0) return;
+    if (el.offsetWidth > available) el.style.maxWidth = `${available}px`;
+    const rect = el.getBoundingClientRect();
+    let dx = 0;
+    if (rect.left < left + margin) dx = left + margin - rect.left;
+    else if (rect.right > right - margin) dx = right - margin - rect.right;
+    if (dx) el.style.translate = `${Math.round(dx)}px 0`;
+  }
+
   function keydown(event: KeyboardEvent) {
     if (event.key === "Escape") close();
   }
 </script>
 
-<div class="picker {placement}" role="dialog" aria-label={title} tabindex="-1" onkeydown={keydown}>
+<div class="picker {placement}" bind:this={node} role="dialog" aria-label={title} tabindex="-1" onkeydown={keydown}>
   <div class="tabs" role="tablist">
     <button type="button" role="tab" aria-selected={tab === "standard"} class:active={tab === "standard"} onclick={() => (tab = "standard")}>標準</button>
     <button type="button" role="tab" aria-selected={tab === "custom"} class:active={tab === "custom"} onclick={() => (tab = "custom")}>カスタム</button>
