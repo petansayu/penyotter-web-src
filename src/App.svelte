@@ -48,6 +48,8 @@
     const pubkey = viewer.pubkey;
     if (!pubkey) return;
     return untrack(() => {
+      // ブロックしたリレーは、どこにもつなぐ前に当てる（技術資料 4.6）
+      viewer.restoreBlockedRelays(pubkey);
       deck.load(pubkey);
       viewer.restoreMutes(pubkey);
       home.open(pubkey);

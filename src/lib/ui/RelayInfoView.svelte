@@ -2,6 +2,8 @@
   import { relayDetails, type RelayDetails } from "../nostr/relayInfo";
   import { profileHref, relayFeedHref } from "../router.svelte";
   import { viewer } from "../store/viewer.svelte";
+  import { lists } from "../store/lists.svelte";
+  import { RELAY_BLOCK_NOTE } from "./relayBlock";
 
   /** リレーの情報画面（NIP-11、Android 版の RelayInfoScreen）。このアカウントでの使い方も出す。 */
   let { url }: { url: string } = $props();
@@ -16,6 +18,14 @@
   const usage = $derived(
     [viewer.readRelays.includes(url) && "読み込み", viewer.writeRelays.includes(url) && "書き込み", viewer.alwaysOn.includes(url) && "常時接続"].filter(Boolean).join("・"),
   );
+
+  // リレーのブロック（技術資料 4.6）
+  const blocked = $derived(viewer.isBlocked(url));
+  let asking = $state(false);
+  async function changeBlock(value: boolean) {
+    asking = false;
+    await lists.blockRelay(url, value);
+  }
 </script>
 
 <section class="relay">
@@ -28,7 +38,22 @@
     </div>
   </div>
   <p class="usage">このアカウントでの使い方: {usage || "使っていません"}</p>
-  {#if url.startsWith("wss://")}<p class="usage"><a href={relayFeedHref(url)}>このリレーのタイムライン</a></p>{/if}
+  {#if blocked}<p class="blocked">ブロック中のリレーです。読み込みにも書き込みにも使いません。</p>{/if}
+  {#if viewer.canSign}
+    <div class="block">
+      {#if blocked}
+        <button type="button" class="outline" disabled={lists.busy.has(10006)} onclick={() => changeBlock(false)}>ブロックを解除</button>
+      {:else if asking}
+        <p><strong>このリレーをブロックしますか？</strong></p>
+        <p class="muted">{RELAY_BLOCK_NOTE} ブロックしたリレーの一覧は公開されます。</p>
+        <button type="button" class="text" onclick={() => (asking = false)}>やめる</button>
+        <button type="button" class="filled danger" disabled={lists.busy.has(10006)} onclick={() => changeBlock(true)}>ブロック</button>
+      {:else}
+        <button type="button" class="outline danger" onclick={() => (asking = true)}>このリレーをブロック</button>
+      {/if}
+    </div>
+  {/if}
+  {#if url.startsWith("wss://") && !blocked}<p class="usage"><a href={relayFeedHref(url)}>このリレーのタイムライン</a></p>{/if}
   {#if details === undefined}
     <p class="muted">読み込んでいます…</p>
   {:else if details === null}
@@ -56,6 +81,42 @@
 <style>
   .relay {
     padding: 0 0 16px;
+  }
+  .blocked {
+    color: #c33;
+    font-size: 0.9em;
+  }
+  .block {
+    margin: 8px 16px;
+  }
+  .block p {
+    margin: 4px 0;
+  }
+  .block button {
+    min-height: 40px;
+    padding: 0 16px;
+    margin: 4px 8px 4px 0;
+    border-radius: 20px;
+    border: 1px solid var(--outline);
+    background: none;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+  }
+  .block button.text {
+    border-color: transparent;
+  }
+  .block button.danger {
+    color: #c33;
+  }
+  .block button.filled.danger {
+    background: #c33;
+    border-color: #c33;
+    color: #fff;
+  }
+  .block button:disabled {
+    opacity: 0.5;
+    cursor: default;
   }
   .banner {
     display: block;

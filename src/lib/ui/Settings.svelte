@@ -23,6 +23,9 @@
   import Avatar from "./Avatar.svelte";
   import { displayName, requestProfiles } from "../store/cache.svelte";
   import { pool } from "../nostr/pool";
+  import { blockAddress } from "../domain/blockedRelays";
+  import { lists } from "../store/lists.svelte";
+  import { RELAY_BLOCK_NOTE } from "./relayBlock";
   import Icon, { type IconName } from "./Icon.svelte";
   import { GROUP_LABELS, schemeFor, THEMES } from "./themes";
 
@@ -154,7 +157,28 @@
   let protocolMessage = $state<string | null>(null);
 
   // リレーの接続の状況（Android 版の設定「リレー」のトップ）。2 秒ごとに見直す
-  const STATUS_LABELS = { connected: "接続中", connecting: "接続しています", closed: "未接続", unavailable: "応答なし（しばらく使いません）" } as const;
+  const STATUS_LABELS = { connected: "接続中", connecting: "接続しています", closed: "未接続", unavailable: "応答なし（しばらく使いません）", blocked: "ブロック中" } as const;
+
+  // ブロックしたリレー（kind 10006、技術資料 4.6）
+  let newBlocked = $state("");
+  let blockedMessage = $state<string | null>(null);
+  let blockConfirm = $state<string | null>(null);
+  function askBlock() {
+    const address = blockAddress(newBlocked);
+    if (!address) blockedMessage = "リレーのアドレス（wss://…）を入れてください";
+    else if (viewer.isBlocked(address)) blockedMessage = "もうブロックしています";
+    else {
+      blockedMessage = null;
+      blockConfirm = address;
+    }
+  }
+  async function changeBlock(relay: string, blocked: boolean) {
+    blockConfirm = null;
+    if (await lists.blockRelay(relay, blocked)) {
+      if (blocked) newBlocked = "";
+      blockedMessage = blocked ? "ブロックしました。このリレーにはつなぎません。" : "ブロックを解きました。";
+    }
+  }
   const statusRelays = $derived([...new Set([...viewer.readRelays, ...viewer.writeRelays])]);
   let statusTick = $state(0);
   $effect(() => {
@@ -410,6 +434,37 @@
         <button type="button" class="text" onclick={() => (searchText = DEFAULT_SEARCH_RELAYS.join(NEWLINE))}>最初の値に戻す</button>
         {#if searchMessage}<span class="muted">{searchMessage}</span>{/if}
       </div>
+      <h3>ブロックしたリレー</h3>
+      <p class="muted">{RELAY_BLOCK_NOTE} 一覧は「ブロックしたリレー」（NIP-51、kind 10006）として書き込みリレーへ公開し、対応するほかのアプリとも共有します。</p>
+      <ul class="relay-rows" aria-label="ブロックしたリレー">
+        {#each viewer.blockedRelays as url (url)}
+          <li>
+            <a class="relay-url" href={relayHref(url)}>{url.replace(/^wss:\/\//, "")}</a>
+            {#if viewer.canSign}<button type="button" class="outline" disabled={lists.busy.has(10006)} onclick={() => changeBlock(url, false)}>解除</button>{/if}
+          </li>
+        {:else}
+          <li class="muted">ブロックしているリレーはありません</li>
+        {/each}
+      </ul>
+      {#if viewer.canSign}
+        <div class="actions">
+          <input bind:value={newBlocked} placeholder="wss://…" aria-label="ブロックするリレー" onkeydown={(event) => event.key === "Enter" && askBlock()} />
+          <button type="button" class="outline" disabled={lists.busy.has(10006) || !newBlocked.trim()} onclick={askBlock}>ブロック</button>
+        </div>
+        {#if blockConfirm}
+          <div class="confirm-box">
+            <p><strong>{blockConfirm} をブロックしますか？</strong></p>
+            <p class="muted">ブロックしたリレーの一覧は公開されます。</p>
+            <div class="actions">
+              <button type="button" class="text" onclick={() => (blockConfirm = null)}>やめる</button>
+              <button type="button" class="filled" disabled={lists.busy.has(10006)} onclick={() => changeBlock(blockConfirm!, true)}>ブロック</button>
+            </div>
+          </div>
+        {/if}
+      {:else}
+        <p class="muted">見るだけのアカウントでは変えられません。</p>
+      {/if}
+      {#if blockedMessage}<p class="muted" role="status">{blockedMessage}</p>{/if}
       {#if viewer.canSign}
         <h3>認証</h3>
         {@render switchRow("認証を求めるリレーに答える（NIP-42）", settings.relayAuth, (value) => (settings.relayAuth = value), "オンにすると、読み書きに認証が要るリレーに、署名して答えます。ブラウザ拡張によっては、リレーにつなぐたびに確認の画面が出ます。オフのときは答えないので、そのリレーからは読めない・送れないことがあります。")}
@@ -598,7 +653,8 @@
   .dot.connecting {
     background: #d9a400;
   }
-  .dot.unavailable {
+  .dot.unavailable,
+  .dot.blocked {
     background: #c33;
   }
   .accounts {
