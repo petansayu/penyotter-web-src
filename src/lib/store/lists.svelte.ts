@@ -10,6 +10,7 @@ import { summary } from "./publishSummary";
 import { toast } from "./toast.svelte";
 import { viewer } from "./viewer.svelte";
 import { LEGACY_PROFILE_BADGES, profileBadgeList, profileBadgeTags } from "../domain/badges";
+import { blockedKeys, relayKey, withBlockedRelay } from "../domain/blockedRelays";
 
 /**
  * フォロー一覧（kind 3）とミュート一覧（kind 10000）の書き換え（技術資料 7 章、Android 版の ListGuard・
@@ -17,8 +18,8 @@ import { LEGACY_PROFILE_BADGES, profileBadgeList, profileBadgeTags } from "../do
  * 取り直しが完了しなければやめる。危ない変更は先に聞き、元の版と署名した版を履歴に残してから送る。
  */
 
-export type ListKind = 3 | 10000 | 10003 | 10008 | 10030;
-const LIST_NAMES: Record<ListKind, string> = { 3: "フォロー一覧", 10000: "ミュート一覧", 10003: "ブックマーク", 10008: "プロフィールのバッジ", 10030: "絵文字リスト" };
+export type ListKind = 3 | 10000 | 10003 | 10006 | 10008 | 10030;
+const LIST_NAMES: Record<ListKind, string> = { 3: "フォロー一覧", 10000: "ミュート一覧", 10003: "ブックマーク", 10006: "ブロックしたリレー", 10008: "プロフィールのバッジ", 10030: "絵文字リスト" };
 
 export interface Confirmation {
   kind: ListKind;
@@ -162,6 +163,14 @@ class Lists {
     return this.change(10030, (tags) => withoutTag(tags, "a", address), true);
   }
 
+  /**
+   * リレーをブロックする・解く（kind 10006、技術資料 4.6）。1 回に 1 件なので、確認は一覧が空になるときだけ。
+   * 一覧はブロックしたリレーへは送らない（apply）。
+   */
+  blockRelay(relay: string, blocked: boolean) {
+    return this.change(10006, (tags) => withBlockedRelay(tags, relay, blocked), true);
+  }
+
   /** 履歴の版から戻す（技術資料 7.4）。差は画面で見てから選ぶが、条件に当たれば確認も出す。 */
   /**
    * プロフィールに飾るバッジ（kind 10008）を pairs（定義のアドレス, 授与の ID）の順にする（Android 版の
@@ -224,7 +233,8 @@ class Lists {
     const same = pending && base === pending && sameTags(pending.tags, template.tags) && pending.content === template.content;
     // 5. 危ない変更は先に聞く
     // 最初のバッジを飾るときは一覧を作るのが当たり前なので聞かない（Android 版と同じ）
-    const reason = kind === 10008 && !base ? null : confirmReason(base, template.tags, single);
+    // リレーのブロックは 1 回に 1 件なので聞かない（Android 版と同じ）
+    const reason = (kind === 10008 && !base) || kind === 10006 ? null : confirmReason(base, template.tags, single);
     if (reason && !(await this.ask(kind, reason, diffTags(base?.tags ?? [], template.tags)))) return null;
     let event: Event;
     if (same) event = pending;
@@ -236,7 +246,11 @@ class Lists {
       writePending(me, kind, event);
     }
     // 7. 書き込みリレーへ送る。受理されたら送信待ちを消して使う
-    const result = await publish(viewer.writeRelays, event);
+    // ブロックの一覧は、その一覧でブロックするリレーへは送らない
+    const blockedNow = kind === 10006 ? blockedKeys(event) : new Set<string>();
+    const targets = viewer.writeRelays.filter((url) => !blockedNow.has(relayKey(url) ?? ""));
+    if (targets.length === 0) throw new Error("書き込みリレーがすべてブロックされているため、一覧を送れません。");
+    const result = await publish(targets, event);
     if (result.accepted > 0) {
       writePending(me, kind, null);
       if (viewer.pubkey === me) {

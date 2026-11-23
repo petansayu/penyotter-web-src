@@ -1,4 +1,5 @@
 import { petnames } from "../domain/lists";
+import { BLOCKED_RELAYS_KIND, blockedAddresses, blockedKeys, relayKey } from "../domain/blockedRelays";
 import { muteRules, parsePrivateTags } from "../domain/muteRules";
 import { nip05, nip19 } from "nostr-tools";
 import { isHex64, latest, type Event } from "../nostr/events";
@@ -67,6 +68,9 @@ class Viewer {
   bookmarkList = $state<Event>();
   /** ブックマークした投稿の ID（`e`）と、記事などのアドレス（`a`）。 */
   bookmarks = $state<Set<string>>(new Set());
+  /** ブロックしたリレーの一覧（kind 10006）と、そのリレー（技術資料 4.6）。どれにもつながない。 */
+  blockedRelayList = $state<Event>();
+  blockedRelays = $state<string[]>([]);
   /** 読んだリレーリスト（kind 10002）。リレー設定の画面で編集の元にし、公開する前に取り直して比べる。 */
   relayListEvent = $state<Event>();
   /** 取り込んでいないリレーリスト（起動時にリレーで見つけた、今使っているものと違う版。技術資料 4.1.1）。 */
@@ -342,15 +346,52 @@ class Viewer {
     this.bookmarks = new Set(event?.tags.filter((tag) => (tag[0] === "e" && isHex64(tag[1])) || (tag[0] === "a" && tag[1])).map((tag) => tag[1]) ?? []);
   }
 
-  /** 置き換え可能な一覧（3・10000・10003）を使う。 */
-  applyList(kind: 3 | 10000 | 10003, event: Event | undefined) {
+  /** 置き換え可能な一覧（3・10000・10003・10006）を使う。 */
+  applyList(kind: 3 | 10000 | 10003 | 10006, event: Event | undefined) {
     if (kind === 3) this.applyContacts(event);
     else if (kind === 10000) this.applyMutes(event);
+    else if (kind === BLOCKED_RELAYS_KIND) this.applyBlockedRelays(event);
     else this.applyBookmarks(event);
   }
 
-  listOf(kind: 3 | 10000 | 10003): Event | undefined {
-    return kind === 3 ? this.contactList : kind === 10000 ? this.muteList : this.bookmarkList;
+  listOf(kind: 3 | 10000 | 10003 | 10006): Event | undefined {
+    return kind === 3 ? this.contactList : kind === 10000 ? this.muteList : kind === BLOCKED_RELAYS_KIND ? this.blockedRelayList : this.bookmarkList;
+  }
+
+  /** ブロックしたリレーの一覧を使う（つないでいるものは閉じる）。次に開いたとき先に当てられるよう、このブラウザに控える。 */
+  applyBlockedRelays(event: Event | undefined) {
+    const me = this.pubkey;
+    const valid = event && event.kind === BLOCKED_RELAYS_KIND && event.pubkey === me ? event : undefined;
+    this.blockedRelayList = valid;
+    this.blockedRelays = blockedAddresses(valid);
+    pool.block(blockedKeys(valid));
+    if (!me) return;
+    try {
+      if (valid) localStorage.setItem(`blocked-relays.${me}`, JSON.stringify(valid));
+      else localStorage.removeItem(`blocked-relays.${me}`);
+    } catch {
+      // 控えられなくても、リレーから読めば当たる
+    }
+  }
+
+  /** 前に読んだブロックしたリレーの一覧を、リレーにつなぐ前に当てる。控えがなければ空にする。 */
+  restoreBlockedRelays(pubkey: string) {
+    let saved: Event | null = null;
+    try {
+      saved = JSON.parse(localStorage.getItem(`blocked-relays.${pubkey}`) ?? "null") as Event | null;
+    } catch {
+      saved = null;
+    }
+    const valid = saved && saved.kind === BLOCKED_RELAYS_KIND && saved.pubkey === pubkey && Array.isArray(saved.tags) ? saved : undefined;
+    this.blockedRelayList = valid;
+    this.blockedRelays = blockedAddresses(valid);
+    pool.block(blockedKeys(valid));
+  }
+
+  /** そのリレーをブロックしているか（画面用。blockedRelays を読むので、変わると描き直される）。 */
+  isBlocked(url: string): boolean {
+    const key = relayKey(url);
+    return key !== null && this.blockedRelays.some((address) => relayKey(address) === key);
   }
 
   /** フォロー一覧を使う（読んだとき・書き換えたとき）。 */
@@ -447,12 +488,16 @@ class Viewer {
     this.readRelays = parsed.read.length > 0 ? parsed.read : lookIn;
     this.writeRelays = parsed.write.length > 0 ? parsed.write : lookIn;
     const relays = relaySet([...this.readRelays, ...this.writeRelays]);
-    const [contacts, mutes, bookmarks] = await Promise.all([
+    const [contacts, mutes, bookmarks, blocked] = await Promise.all([
       pool.fetch(relays, [{ kinds: [3], authors: [pubkey], limit: 5 }]),
       pool.fetch(this.readRelays, [{ kinds: [10000], authors: [pubkey], limit: 5 }]),
       pool.fetch(this.readRelays, [{ kinds: [10003], authors: [pubkey], limit: 5 }]),
+      pool.fetch(relays, [{ kinds: [BLOCKED_RELAYS_KIND], authors: [pubkey], limit: 5 }]),
     ]);
     if (this.pubkey !== pubkey) return;
+    // ブロックの一覧は控えより新しい版が見つかったときだけ替える（読めなかったことで外れないように）
+    const blockedList = latest(eventsOf(blocked).filter((event) => event.pubkey === pubkey));
+    if (blockedList && (!this.blockedRelayList || blockedList.created_at > this.blockedRelayList.created_at)) this.applyBlockedRelays(blockedList);
     const contactList = latest(eventsOf(merge([contacts])));
     this.applyContacts(contactList);
     // 控えより古い版しか見つからない、または読み切れずに見つからないときは、控えのまま（ミュートが外れないように）

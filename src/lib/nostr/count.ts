@@ -1,11 +1,12 @@
 import type { Filter } from "./events";
+import { pool } from "./pool";
 
 /**
  * 件数（NIP-45 の COUNT、技術資料 4.6）。フォロワー数だけに使う。リレーそれぞれに専用の接続を開き、5 秒で打ち切る。
  * 答えたリレーのうちいちばん大きい数を使い、どれかが approximate を返したらおよその数とする。どこも答えなければ null。
  */
 export async function count(relays: string[], filter: Filter, limit = 5000): Promise<{ count: number; approximate: boolean } | null> {
-  const answers = await Promise.all(relays.map((url) => countOne(url, filter, limit)));
+  const answers = await Promise.all(relays.filter((url) => !pool.isBlocked(url)).map((url) => countOne(url, filter, limit)));
   const got = answers.filter((a): a is { count: number; approximate: boolean } => a !== null);
   if (got.length === 0) return null;
   return { count: Math.max(...got.map((a) => a.count)), approximate: got.some((a) => a.approximate) };

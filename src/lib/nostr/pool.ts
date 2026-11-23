@@ -1,5 +1,6 @@
 import { acceptable, type Event, type Filter } from "./events";
 import { TEST_RELAY } from "./testMode";
+import { relayKey } from "../domain/blockedRelays";
 
 /**
  * リレーとの接続（Android 版の技術資料 4.2・4.3）。1 つのリレーにつき WebSocket は 1 本で、REQ は相乗りする。
@@ -92,6 +93,21 @@ class RelayConnection {
       this.pending.delete(event.id);
       this.scheduleIdle();
     };
+  }
+
+  /**
+   * ブロックしたので閉じる。購読には EOSE（もう何も来ない）、送信中のものには拒否を返し、つなぎ直さない。
+   */
+  shutdown() {
+    const subs = [...this.subs.values()];
+    const pending = [...this.pending.values()];
+    this.subs.clear();
+    this.pending.clear();
+    clearTimeout(this.retryTimer);
+    clearTimeout(this.idleTimer);
+    subs.forEach((sub) => sub.onEose?.());
+    pending.forEach((waiting) => waiting.done(false, "blocked: ブロックしたリレー"));
+    this.ws?.close();
   }
 
   /** 順番待ちの REQ を、同時に MAX_ACTIVE 件までになるよう送る。 */
@@ -302,9 +318,28 @@ export class RelayPool {
    */
   authenticator: ((url: string, challenge: string, sending: boolean) => Promise<Event | null>) | null = null;
   private readonly unavailable = new Map<string, number>();
+  /** ブロックしたリレー（relayKey の集合）。どこから来てもつながない（技術資料 4.6）。 */
+  private blockedKeys = new Set<string>();
+
+  /** ブロックしたリレーを決める。いまつながっているものは閉じる。 */
+  block(keys: Iterable<string>) {
+    this.blockedKeys = new Set(keys);
+    for (const [url, connection] of [...this.connections]) {
+      if (!this.isBlocked(url)) continue;
+      this.connections.delete(url);
+      connection.shutdown();
+    }
+  }
+
+  isBlocked(url: string): boolean {
+    if (this.blockedKeys.size === 0) return false;
+    const key = relayKey(url);
+    return key !== null && this.blockedKeys.has(key);
+  }
 
   /** 接続の状況。使えないとみなしている間は unavailable。まだつないでいないものは closed。 */
-  status(url: string): "connected" | "connecting" | "closed" | "unavailable" {
+  status(url: string): "connected" | "connecting" | "closed" | "unavailable" | "blocked" {
+    if (this.isBlocked(url)) return "blocked";
     if (!this.available(url)) return "unavailable";
     return this.connections.get(url)?.state ?? "closed";
   }
@@ -327,6 +362,7 @@ export class RelayPool {
   }
 
   available(url: string): boolean {
+    if (this.isBlocked(url)) return false;
     const until = this.unavailable.get(url);
     if (until === undefined) return true;
     if (until > Date.now()) return false;
@@ -399,7 +435,7 @@ export class RelayPool {
   /** 購読。返した関数で止める。 */
   subscribe(relays: string[], filters: Filter[], onEvent: (event: Event, relay: string) => void): () => void {
     if (filters.length === 0) return () => {};
-    const requests = relays.map((url) => this.relay(url).req(filters, { onEvent: (event) => onEvent(event, url) }));
+    const requests = relays.filter((url) => !this.isBlocked(url)).map((url) => this.relay(url).req(filters, { onEvent: (event) => onEvent(event, url) }));
     return () => requests.forEach((request) => request.close());
   }
 }
@@ -421,8 +457,10 @@ const PUBLISH_LIMIT = 12_000;
  * 「確認できない」。テストモードでは、手元のテスト用リレー以外へは送らない。
  */
 export function publish(relays: string[], event: Event, onUpdate?: (result: PublishResult) => void): Promise<PublishResult> {
-  const targets = [...new Set(TEST_RELAY ? relays.filter((url) => url === TEST_RELAY) : relays)];
-  const states = new Map(targets.map((url) => [url, { state: "waiting" as PublishState, message: "" }]));
+  const asked = [...new Set(TEST_RELAY ? relays.filter((url) => url === TEST_RELAY) : relays)];
+  // ブロックしたリレーへは送らず、断られたものとして数える（技術資料 4.6）
+  const targets = asked.filter((url) => !pool.isBlocked(url));
+  const states = new Map(asked.map((url) => [url, pool.isBlocked(url) ? { state: "rejected" as PublishState, message: "ブロックしたリレー" } : { state: "waiting" as PublishState, message: "" }]));
   const snapshot = (): PublishResult => ({
     relays: new Map([...states].map(([url, value]) => [url, { ...value }])),
     accepted: [...states.values()].filter((value) => value.state === "accepted").length,
