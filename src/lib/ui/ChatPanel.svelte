@@ -14,6 +14,7 @@
   import { displayName } from "../store/cache.svelte";
   import { chat } from "../store/chat.svelte";
   import { composer } from "../store/composer.svelte";
+  import { deck } from "../store/deck.svelte";
   import { lists } from "../store/lists.svelte";
   import { summary } from "../store/publishSummary";
   import { settings } from "../store/settings.svelte";
@@ -46,6 +47,8 @@
   let menuFor = $state<Event | null>(null);
   let sendMessage = $state<string | null>(null);
   let bottom = $state<HTMLElement>();
+  /** 下に固定した入力欄の高さ。最後のメッセージが入力欄に隠れないよう、同じ高さの余白を置く。 */
+  let inputHeight = $state(0);
 
   $effect(() => {
     void chat.load();
@@ -241,8 +244,12 @@
       {/each}
       <span bind:this={bottom}></span>
     </div>
-    {#if viewer.canSign}
-      <div class="input">
+    {#if viewer.canSign && composer.open && !deck.active}
+      <!-- 引用している間は投稿欄が同じ場所に出るので、入力欄は出さない（Android 版と同じ） -->
+    {:else if viewer.canSign}
+      <!-- 投稿欄と同じく、下のタブのすぐ上（文字を打っている間はキーボードのすぐ上）に固定する -->
+      <div class="input-space" style:height="{inputHeight}px"></div>
+      <div class="input" bind:clientHeight={inputHeight}>
         {#if replyTo}
           <div class="replying"><Icon name="reply" size={14} /><span>{displayName(replyTo.pubkey)}: {snippet(replyTo)}</span><button type="button" class="icon" onclick={() => (replyTo = null)} aria-label="返信をやめる"><Icon name="close" size={16} /></button></div>
         {/if}
@@ -637,11 +644,30 @@
     margin: 2px 6px 0;
   }
   .input {
-    position: sticky;
-    bottom: 0;
+    position: fixed;
+    left: 50%;
+    transform: translateX(-50%);
+    bottom: calc(60px + env(safe-area-inset-bottom));
+    z-index: 20;
+    width: min(100%, var(--column));
     padding: 8px 12px;
     background: var(--container);
     border-top: 1px solid var(--outline-variant);
+  }
+  /* 文字を打っている間は下のタブを隠すので、入力欄をいちばん下（キーボードのすぐ上）に置く（投稿欄と同じ） */
+  :global(:root.typing) .input {
+    bottom: env(safe-area-inset-bottom);
+  }
+  /* カラム表示では下のタブがないので、これまでどおり画面の下に貼り付ける */
+  :global(:root.deck) .input {
+    position: sticky;
+    bottom: 0;
+    left: auto;
+    transform: none;
+    width: auto;
+  }
+  :global(:root.deck) .input-space {
+    display: none;
   }
   .replying {
     display: flex;
